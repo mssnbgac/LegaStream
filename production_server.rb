@@ -588,6 +588,10 @@ class ProductionServer
     # Serve static files from frontend/dist
     frontend_dir = File.join(__dir__, 'frontend', 'dist')
     
+    puts "[FRONTEND] Attempting to serve: #{path}"
+    puts "[FRONTEND] Frontend dir: #{frontend_dir}"
+    puts "[FRONTEND] Dir exists: #{File.exist?(frontend_dir)}"
+    
     # Map path to file
     file_path = if path == '/' || path.empty?
       File.join(frontend_dir, 'index.html')
@@ -595,9 +599,13 @@ class ProductionServer
       File.join(frontend_dir, path)
     end
     
+    puts "[FRONTEND] File path: #{file_path}"
+    puts "[FRONTEND] File exists: #{File.exist?(file_path)}"
+    
     # If file doesn't exist, serve index.html (for client-side routing)
     unless File.exist?(file_path) && File.file?(file_path)
       file_path = File.join(frontend_dir, 'index.html')
+      puts "[FRONTEND] Falling back to index.html"
     end
     
     if File.exist?(file_path)
@@ -617,10 +625,21 @@ class ProductionServer
       
       res['Content-Type'] = content_type
       res.body = File.read(file_path)
+      puts "[FRONTEND] Served #{file_path} as #{content_type}"
     else
+      puts "[FRONTEND] ERROR: File not found: #{file_path}"
       res.status = 404
-      res['Content-Type'] = 'text/html'
-      res.body = '<h1>404 - Not Found</h1>'
+      res['Content-Type'] = 'application/json'
+      res.body = { 
+        error: 'Not Found',
+        debug: {
+          path: path,
+          frontend_dir: frontend_dir,
+          file_path: file_path,
+          dir_exists: File.exist?(frontend_dir),
+          files: File.exist?(frontend_dir) ? Dir.entries(frontend_dir) : []
+        }
+      }.to_json
     end
   end
 
