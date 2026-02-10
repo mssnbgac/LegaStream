@@ -269,19 +269,6 @@ export function Login() {
               </Link>
             </p>
           </div>
-
-          {/* Login Credentials - Centered */}
-          <div className="text-center">
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-              <p className="text-sm text-gray-400 mb-2">Default admin account:</p>
-              <p className="text-base text-gray-300 font-mono mb-2">
-                admin@legastream.com / password
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                Or register for a new account above
-              </p>
-            </div>
-          </div>
         </form>
       </div>
     </div>
