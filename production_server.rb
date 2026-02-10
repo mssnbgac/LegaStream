@@ -1167,11 +1167,14 @@ class ProductionServer
       puts "Attempting to send confirmation email to: #{email}"
       puts "SMTP Config: #{ENV['SMTP_HOST']}:#{ENV['SMTP_PORT']} (#{ENV['SMTP_USERNAME']})"
       
+      # Use Render URL in production, localhost in development
+      base_url = ENV['RENDER_EXTERNAL_URL'] || 'http://localhost:5173'
+      
       mail = Mail.new do
         from     ENV['SMTP_USERNAME'] || 'noreply@legastream.com'
         to       email
         subject  'Confirm your LegaStream account'
-        body     "Hi #{name},\n\nPlease confirm your account by clicking this link:\nhttp://localhost:5173/confirm-email?token=#{token}\n\nThanks,\nLegaStream Team"
+        body     "Hi #{name},\n\nPlease confirm your account by clicking this link:\n#{base_url}/confirm-email?token=#{token}\n\nThanks,\nLegaStream Team"
       end
       
       mail.deliver!
@@ -1187,11 +1190,14 @@ class ProductionServer
     begin
       puts "Attempting to send password reset email to: #{email}"
       
+      # Use Render URL in production, localhost in development
+      base_url = ENV['RENDER_EXTERNAL_URL'] || 'http://localhost:5173'
+      
       mail = Mail.new do
         from     ENV['SMTP_USERNAME'] || 'noreply@legastream.com'
         to       email
         subject  'Reset your LegaStream password'
-        body     "Hi #{name},\n\nReset your password by clicking this link:\nhttp://localhost:5173/reset-password?token=#{token}\n\nThis link expires in 2 hours.\n\nThanks,\nLegaStream Team"
+        body     "Hi #{name},\n\nReset your password by clicking this link:\n#{base_url}/reset-password?token=#{token}\n\nThis link expires in 2 hours.\n\nThanks,\nLegaStream Team"
       end
       
       mail.deliver!
