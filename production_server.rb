@@ -220,16 +220,19 @@ class ProductionServer
     puts "[#{Time.now}] #{method} #{path}"
     STDERR.puts "[DEBUG] Testing path: #{path}"
     
-    res['Content-Type'] = 'application/json'
+    # Don't set content-type yet - let each handler decide
     
     # Handle regex routes first
     if path =~ %r{^/api/v1/documents/(\d+)/entities$}
+      res['Content-Type'] = 'application/json'
       STDERR.puts "[DEBUG] Matched entities route, doc_id: #{$1}"
       handle_document_entities(req, res, $1)
     elsif path =~ %r{^/api/v1/documents/(\d+)/analyze$}
+      res['Content-Type'] = 'application/json'
       STDERR.puts "[DEBUG] Matched analyze route, doc_id: #{$1}"
       handle_document_analyze(req, res, $1)
     elsif path =~ %r{^/api/v1/documents/(\d+)$}
+      res['Content-Type'] = 'application/json'
       STDERR.puts "[DEBUG] Matched document detail route, doc_id: #{$1}"
       handle_document_detail(req, res, method, $1)
     else
@@ -237,20 +240,28 @@ class ProductionServer
       # Handle exact match routes
       case path
       when '/api/v1/auth/register'
+        res['Content-Type'] = 'application/json'
         handle_register(req, res)
       when '/api/v1/auth/login'
+        res['Content-Type'] = 'application/json'
         handle_login(req, res)
       when '/api/v1/auth/forgot_password', '/api/v1/auth/forgot-password'
+        res['Content-Type'] = 'application/json'
         handle_forgot_password(req, res)
       when '/api/v1/auth/reset_password', '/api/v1/auth/reset-password'
+        res['Content-Type'] = 'application/json'
         handle_reset_password(req, res)
       when '/api/v1/auth/confirm_email', '/api/v1/auth/confirm-email'
+        res['Content-Type'] = 'application/json'
         handle_confirm_email(req, res)
       when '/api/v1/documents'
+        res['Content-Type'] = 'application/json'
         handle_documents(req, res, method)
       when '/api/v1/stats'
+        res['Content-Type'] = 'application/json'
         handle_stats(req, res)
       when '/up'
+        res['Content-Type'] = 'application/json'
         handle_health_check(req, res)
       else
         # Serve frontend for all non-API routes
