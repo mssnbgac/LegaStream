@@ -253,10 +253,16 @@ class ProductionServer
       when '/up'
         handle_health_check(req, res)
       else
-        puts "No route matched for #{path}"
-        STDERR.puts "[DEBUG] No exact match either, returning 404"
-        res.status = 404
-        res.body = { error: 'Not Found' }.to_json
+        # Serve frontend for all non-API routes
+        if path.start_with?('/api/')
+          puts "No route matched for #{path}"
+          STDERR.puts "[DEBUG] No exact match either, returning 404"
+          res.status = 404
+          res.body = { error: 'Not Found' }.to_json
+        else
+          # Serve React frontend
+          serve_frontend(req, res, path)
+        end
       end
     end
   end
@@ -565,6 +571,46 @@ class ProductionServer
         storage: 'available'
       }
     }.to_json
+  end
+
+  def serve_frontend(req, res, path)
+    # Serve static files from frontend/dist
+    frontend_dir = File.join(__dir__, 'frontend', 'dist')
+    
+    # Map path to file
+    file_path = if path == '/' || path.empty?
+      File.join(frontend_dir, 'index.html')
+    else
+      File.join(frontend_dir, path)
+    end
+    
+    # If file doesn't exist, serve index.html (for client-side routing)
+    unless File.exist?(file_path) && File.file?(file_path)
+      file_path = File.join(frontend_dir, 'index.html')
+    end
+    
+    if File.exist?(file_path)
+      # Set content type based on file extension
+      ext = File.extname(file_path)
+      content_type = case ext
+      when '.html' then 'text/html'
+      when '.js' then 'application/javascript'
+      when '.css' then 'text/css'
+      when '.json' then 'application/json'
+      when '.png' then 'image/png'
+      when '.jpg', '.jpeg' then 'image/jpeg'
+      when '.svg' then 'image/svg+xml'
+      when '.ico' then 'image/x-icon'
+      else 'application/octet-stream'
+      end
+      
+      res['Content-Type'] = content_type
+      res.body = File.read(file_path)
+    else
+      res.status = 404
+      res['Content-Type'] = 'text/html'
+      res.body = '<h1>404 - Not Found</h1>'
+    end
   end
 
   def handle_documents(req, res, method)
