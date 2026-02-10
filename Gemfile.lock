@@ -246,6 +246,7 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
+    webrick (1.9.1)
     zeitwerk (2.7.4)
 
 PLATFORMS
@@ -268,6 +269,7 @@ DEPENDENCIES
   rails (~> 8.0.0)
   ruby-openai
   sqlite3 (~> 2.0)
+  webrick
 
 RUBY VERSION
   ruby 3.3.10
