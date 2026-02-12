@@ -134,10 +134,16 @@ class ProductionServer
 
   def setup_email
     # Configure Mail gem for SMTP
+    puts "📧 Configuring email with SMTP..."
+    puts "   Host: #{ENV['SMTP_HOST']}"
+    puts "   Port: #{ENV['SMTP_PORT']}"
+    puts "   Username: #{ENV['SMTP_USERNAME']}"
+    puts "   Password: #{ENV['SMTP_PASSWORD'] ? '[SET]' : '[NOT SET]'}"
+    
     Mail.defaults do
       delivery_method :smtp, {
         address: ENV['SMTP_HOST'] || 'localhost',
-        port: ENV['SMTP_PORT'] || 587,
+        port: (ENV['SMTP_PORT'] || 587).to_i,
         user_name: ENV['SMTP_USERNAME'],
         password: ENV['SMTP_PASSWORD'],
         authentication: 'plain',
@@ -145,6 +151,8 @@ class ProductionServer
         openssl_verify_mode: 'none'
       }
     end
+    
+    puts "✅ Email configuration complete"
   end
 
   def setup_routes
