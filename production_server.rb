@@ -135,21 +135,44 @@ class ProductionServer
   def setup_email
     # Configure Mail gem for SMTP
     puts "📧 Configuring email with SMTP..."
-    puts "   Host: #{ENV['SMTP_HOST']}"
-    puts "   Port: #{ENV['SMTP_PORT']}"
-    puts "   Username: #{ENV['SMTP_USERNAME']}"
-    puts "   Password: #{ENV['SMTP_PASSWORD'] ? '[SET]' : '[NOT SET]'}"
     
-    Mail.defaults do
-      delivery_method :smtp, {
-        address: ENV['SMTP_HOST'] || 'localhost',
-        port: (ENV['SMTP_PORT'] || 587).to_i,
-        user_name: ENV['SMTP_USERNAME'],
-        password: ENV['SMTP_PASSWORD'],
-        authentication: 'plain',
-        enable_starttls_auto: true,
-        openssl_verify_mode: 'none'
-      }
+    # Check if SendGrid API key is provided (recommended for production)
+    if ENV['SENDGRID_API_KEY']
+      puts "   Provider: SendGrid"
+      puts "   API Key: #{ENV['SENDGRID_API_KEY'][0..10]}..."
+      
+      Mail.defaults do
+        delivery_method :smtp, {
+          address: 'smtp.sendgrid.net',
+          port: 587,
+          user_name: 'apikey',
+          password: ENV['SENDGRID_API_KEY'],
+          authentication: 'plain',
+          enable_starttls_auto: true,
+          openssl_verify_mode: 'none'
+        }
+      end
+    else
+      # Fallback to Gmail SMTP
+      puts "   Provider: Gmail SMTP"
+      puts "   Host: #{ENV['SMTP_HOST']}"
+      puts "   Port: #{ENV['SMTP_PORT']}"
+      puts "   Username: #{ENV['SMTP_USERNAME']}"
+      puts "   Password: #{ENV['SMTP_PASSWORD'] ? '[SET]' : '[NOT SET]'}"
+      puts "   ⚠️  WARNING: Gmail SMTP may be unreliable from cloud servers"
+      puts "   ⚠️  Consider using SendGrid for better deliverability"
+      
+      Mail.defaults do
+        delivery_method :smtp, {
+          address: ENV['SMTP_HOST'] || 'smtp.gmail.com',
+          port: (ENV['SMTP_PORT'] || 587).to_i,
+          user_name: ENV['SMTP_USERNAME'],
+          password: ENV['SMTP_PASSWORD'],
+          authentication: 'plain',
+          enable_starttls_auto: true,
+          openssl_verify_mode: 'none'
+        }
+      end
     end
     
     puts "✅ Email configuration complete"
@@ -1173,13 +1196,19 @@ class ProductionServer
   def send_confirmation_email(email, name, token)
     begin
       puts "Attempting to send confirmation email to: #{email}"
-      puts "SMTP Config: #{ENV['SMTP_HOST']}:#{ENV['SMTP_PORT']} (#{ENV['SMTP_USERNAME']})"
       
       # Use Render URL in production, localhost in development
       base_url = ENV['RENDER_EXTERNAL_URL'] || 'http://localhost:5173'
       
+      from_email = ENV['SMTP_FROM_EMAIL'] || ENV['SMTP_USERNAME'] || 'noreply@legastream.com'
+      from_name = ENV['SMTP_FROM_NAME'] || 'LegaStream'
+      
+      puts "From: #{from_name} <#{from_email}>"
+      puts "To: #{email}"
+      puts "Link: #{base_url}/confirm-email?token=#{token}"
+      
       mail = Mail.new do
-        from     ENV['SMTP_USERNAME'] || 'noreply@legastream.com'
+        from     "#{from_name} <#{from_email}>"
         to       email
         subject  'Confirm your LegaStream account'
         body     "Hi #{name},\n\nPlease confirm your account by clicking this link:\n#{base_url}/confirm-email?token=#{token}\n\nThanks,\nLegaStream Team"
@@ -1187,6 +1216,18 @@ class ProductionServer
       
       mail.deliver!
       puts "✅ Confirmation email sent successfully to: #{email}"
+    rescue Net::SMTPAuthenticationError => e
+      puts "❌ SMTP Authentication Failed!"
+      puts "   This usually means:"
+      puts "   1. Wrong password/API key"
+      puts "   2. 2FA not enabled (for Gmail)"
+      puts "   3. App password expired (for Gmail)"
+      puts "Error: #{e.message}"
+    rescue Net::SMTPServerBusy => e
+      puts "❌ SMTP Server Busy/Blocked!"
+      puts "   Gmail may be blocking connections from this IP"
+      puts "   Consider using SendGrid instead"
+      puts "Error: #{e.message}"
     rescue => e
       puts "❌ Failed to send confirmation email to #{email}"
       puts "Error: #{e.class} - #{e.message}"
@@ -1201,8 +1242,11 @@ class ProductionServer
       # Use Render URL in production, localhost in development
       base_url = ENV['RENDER_EXTERNAL_URL'] || 'http://localhost:5173'
       
+      from_email = ENV['SMTP_FROM_EMAIL'] || ENV['SMTP_USERNAME'] || 'noreply@legastream.com'
+      from_name = ENV['SMTP_FROM_NAME'] || 'LegaStream'
+      
       mail = Mail.new do
-        from     ENV['SMTP_USERNAME'] || 'noreply@legastream.com'
+        from     "#{from_name} <#{from_email}>"
         to       email
         subject  'Reset your LegaStream password'
         body     "Hi #{name},\n\nReset your password by clicking this link:\n#{base_url}/reset-password?token=#{token}\n\nThis link expires in 2 hours.\n\nThanks,\nLegaStream Team"
@@ -1210,6 +1254,10 @@ class ProductionServer
       
       mail.deliver!
       puts "✅ Password reset email sent successfully to: #{email}"
+    rescue Net::SMTPAuthenticationError => e
+      puts "❌ SMTP Authentication Failed: #{e.message}"
+    rescue Net::SMTPServerBusy => e
+      puts "❌ SMTP Server Busy/Blocked: #{e.message}"
     rescue => e
       puts "❌ Failed to send reset email to #{email}"
       puts "Error: #{e.class} - #{e.message}"
