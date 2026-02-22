@@ -162,7 +162,8 @@ class AIProvider
   end
 
   def call_gemini_api(prompt)
-    uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=#{@api_key}")
+    # Use gemini-1.5-flash (stable, fast model)
+    uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=#{@api_key}")
     
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
@@ -176,21 +177,34 @@ class AIProvider
       }
     }.to_json
 
-    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: 30) do |http|
+    puts "[Gemini] Sending request to API..."
+    
+    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: 60) do |http|
       http.request(request)
+    end
+
+    puts "[Gemini] Response status: #{response.code}"
+    
+    if response.code != '200'
+      puts "[Gemini] ERROR: HTTP #{response.code}"
+      puts "[Gemini] Response body: #{response.body[0..500]}"
+      return ''
     end
 
     data = JSON.parse(response.body)
     
     # Check for API errors
     if data['error']
-      puts "[ERROR] Gemini API error: #{data['error']['message']}"
+      puts "[Gemini] API error: #{data['error']['message']}"
+      puts "[Gemini] Error code: #{data['error']['code']}"
+      puts "[Gemini] Error status: #{data['error']['status']}"
       return ''
     end
     
     # Check for empty candidates
     unless data['candidates'] && data['candidates'][0]
-      puts "[WARN] No candidates in Gemini response"
+      puts "[Gemini] No candidates in response"
+      puts "[Gemini] Response: #{data.inspect}"
       return ''
     end
     
@@ -199,9 +213,11 @@ class AIProvider
     
     # Check finish reason
     if finish_reason != 'STOP'
-      puts "[WARN] Gemini finished with reason: #{finish_reason}"
+      puts "[Gemini] Finished with reason: #{finish_reason}"
       if finish_reason == 'SAFETY'
-        puts "[WARN] Content was blocked by safety filters"
+        puts "[Gemini] Content was blocked by safety filters"
+      elsif finish_reason == 'MAX_TOKENS'
+        puts "[Gemini] Response truncated due to max tokens"
       end
     end
     
@@ -209,11 +225,23 @@ class AIProvider
     text = data.dig('candidates', 0, 'content', 'parts', 0, 'text')
     
     if text.nil? || text.empty?
-      puts "[WARN] Gemini returned empty text"
+      puts "[Gemini] Empty text in response"
       return ''
     end
     
+    puts "[Gemini] Success! Received #{text.length} chars"
     text
+  rescue Net::ReadTimeout => e
+    puts "[Gemini] TIMEOUT: #{e.message}"
+    ''
+  rescue JSON::ParserError => e
+    puts "[Gemini] JSON parse error: #{e.message}"
+    puts "[Gemini] Response body: #{response.body[0..500]}"
+    ''
+  rescue => e
+    puts "[Gemini] Unexpected error: #{e.class} - #{e.message}"
+    puts e.backtrace.first(3)
+    ''
   end
 
   # Anthropic Claude Implementation

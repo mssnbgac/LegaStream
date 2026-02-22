@@ -74,10 +74,26 @@ class EnterpriseAIService
   private
 
   def extract_legal_entities(text)
+    puts "Extracting legal entities from text (#{text.length} chars)..."
     prompt = build_legal_extraction_prompt(text)
+    puts "Prompt built (#{prompt.length} chars), calling AI provider..."
     
     response = @ai_provider.analyze(prompt)
-    return [] unless response
+    
+    if response.nil?
+      puts "ERROR: AI provider returned nil response"
+      audit_log('ai_provider_error', { error: 'nil response' })
+      return []
+    end
+    
+    if response.empty?
+      puts "ERROR: AI provider returned empty response"
+      audit_log('ai_provider_error', { error: 'empty response' })
+      return []
+    end
+    
+    puts "AI response received (#{response.length} chars)"
+    puts "Response preview: #{response[0..200]}"
     
     parse_legal_entities(response)
   end
