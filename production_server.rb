@@ -9,7 +9,7 @@ require 'mail'
 require 'fileutils'
 require 'time'
 require 'dotenv/load'
-require_relative 'app/services/enterprise_ai_service'
+require_relative 'app/services/ai_analysis_service'
 
 # Force immediate output (no buffering)
 $stdout.sync = true
@@ -850,8 +850,8 @@ class ProductionServer
             puts "🔬 Starting automatic AI analysis for new document #{doc_id}"
             sleep(2) # Small delay to let upload complete
             
-            puts "🤖 Initializing EnterpriseAIService for document #{doc_id}"
-            analyzer = EnterpriseAIService.new(doc_id)
+            puts "🤖 Initializing AIAnalysisService for document #{doc_id}"
+            analyzer = AIAnalysisService.new(doc_id)
             
             puts "⚡ Running analysis..."
             result = analyzer.analyze
