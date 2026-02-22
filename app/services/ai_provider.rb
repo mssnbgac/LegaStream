@@ -124,25 +124,33 @@ class AIProvider
     text_sample = text[0..5000]
     
     prompt = <<~PROMPT
-      Extract legal entities from this document. Return ONLY JSON array.
+      You are a legal document analyzer. Extract entities from this document and return ONLY a JSON array.
       
-      Use these 10 entity types:
-      - PARTY: People or organizations (e.g., "Acme Corp", "John Smith")
-      - ADDRESS: Physical addresses (e.g., "123 Main St, New York")
-      - DATE: Dates (e.g., "March 1, 2026")
-      - AMOUNT: Money (e.g., "$75,000")
-      - OBLIGATION: Legal duties (e.g., "shall perform duties")
-      - CLAUSE: Contract terms (e.g., "30 days notice")
-      - JURISDICTION: Governing law (e.g., "New York law")
-      - TERM: Duration (e.g., "24 months")
-      - CONDITION: Requirements (e.g., "subject to approval")
-      - PENALTY: Damages (e.g., "$5,000 penalty")
+      IMPORTANT: Your response must be ONLY the JSON array, nothing else. No explanations, no markdown, just the array.
       
-      Document:
+      Extract these 10 entity types:
+      1. PARTY - People or organizations (e.g., "Acme Corporation", "John Smith")
+      2. ADDRESS - Physical addresses (e.g., "123 Main Street, New York, NY 10001")
+      3. DATE - Dates (e.g., "March 1, 2026", "Start date: March 1, 2026")
+      4. AMOUNT - Money (e.g., "$75,000", "$75,000 annual salary")
+      5. OBLIGATION - Legal duties (e.g., "Employee shall perform duties diligently")
+      6. CLAUSE - Contract terms (e.g., "Termination with 30 days notice")
+      7. JURISDICTION - Governing law (e.g., "Governed by New York law", "State of New York")
+      8. TERM - Duration (e.g., "24-month contract duration", "Period of 24 months")
+      9. CONDITION - Requirements (e.g., "Subject to background check", "Unless terminated earlier")
+      10. PENALTY - Damages (e.g., "$5,000 liquidated damages", "Penalty of $10,000")
+      
+      Document text:
       #{text_sample}
       
-      Return JSON array (no markdown):
-      [{"type":"PARTY","value":"Acme Corp","context":"party to agreement","confidence":0.95}]
+      Return format (ONLY this, nothing else):
+      [
+        {"type":"PARTY","value":"Acme Corporation","context":"employer party to agreement","confidence":0.95},
+        {"type":"PARTY","value":"John Smith","context":"employee party to agreement","confidence":0.95},
+        {"type":"ADDRESS","value":"123 Main Street, New York","context":"employer address","confidence":0.88},
+        {"type":"DATE","value":"March 1, 2026","context":"agreement start date","confidence":0.92},
+        {"type":"AMOUNT","value":"$75,000 annual salary","context":"employee compensation","confidence":0.95}
+      ]
     PROMPT
 
     response = call_gemini_api(prompt)
@@ -395,19 +403,36 @@ class AIProvider
 
   # Helper method to parse JSON from AI responses
   def parse_json_response(text)
-    return [] if text.nil? || text.empty?
+    if text.nil? || text.empty?
+      puts "[AIProvider] parse_json_response: text is nil or empty"
+      return []
+    end
+    
+    puts "[AIProvider] Parsing response (#{text.length} chars)"
+    puts "[AIProvider] First 200 chars: #{text[0..200]}"
     
     # Remove markdown code blocks if present
     cleaned = text.strip
     cleaned = cleaned.sub(/^```json\s*/, '').sub(/```\s*$/, '')
+    cleaned = cleaned.sub(/^```\s*/, '').sub(/```\s*$/, '')  # Also handle plain ```
     
     # Try to extract JSON array from response
     json_match = cleaned.match(/\[.*\]/m)
-    return [] unless json_match
     
-    JSON.parse(json_match[0])
+    unless json_match
+      puts "[AIProvider] No JSON array found in response"
+      puts "[AIProvider] Cleaned text: #{cleaned[0..300]}"
+      return []
+    end
+    
+    puts "[AIProvider] Found JSON array, attempting to parse..."
+    entities = JSON.parse(json_match[0])
+    puts "[AIProvider] Successfully parsed #{entities.length} entities"
+    entities
   rescue => e
     puts "[AIProvider] JSON parse error: #{e.message}"
+    puts "[AIProvider] Error class: #{e.class}"
+    puts "[AIProvider] Text that failed: #{text[0..500]}"
     []
   end
 end
