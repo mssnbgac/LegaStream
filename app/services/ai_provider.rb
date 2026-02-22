@@ -20,6 +20,27 @@ class AIProvider
     @provider
   end
 
+  # Generic analyze method for custom prompts
+  def analyze(prompt)
+    return nil unless @enabled
+    
+    case @provider
+    when 'gemini'
+      call_gemini_api(prompt)
+    when 'claude', 'anthropic'
+      call_claude_api(prompt)
+    when 'openai'
+      call_openai_api(prompt)
+    when 'ollama'
+      call_ollama_api(prompt)
+    else
+      nil
+    end
+  rescue => e
+    puts "[AIProvider] Error with #{@provider}: #{e.message}"
+    nil
+  end
+
   def extract_entities(text)
     return nil unless @enabled
     
@@ -249,6 +270,20 @@ class AIProvider
     
     content = response.dig('choices', 0, 'message', 'content')
     parse_json_response(content)
+  end
+
+  def call_openai_api(prompt)
+    require 'openai'
+    client = OpenAI::Client.new(access_token: @api_key)
+    
+    response = client.chat(parameters: {
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 2000
+    })
+    
+    response.dig('choices', 0, 'message', 'content') || ''
   end
 
   def compliance_with_openai(text)

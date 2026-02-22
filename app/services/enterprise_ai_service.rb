@@ -83,93 +83,63 @@ class EnterpriseAIService
   end
 
   def build_legal_extraction_prompt(text)
+    # Limit text to 5000 characters for faster processing
+    text_sample = text[0..5000]
+    
     <<~PROMPT
-      You are an expert legal document analyzer. Extract entities with MAXIMUM ACCURACY.
+      Extract legal entities. Return ONLY JSON array, no markdown.
       
-      CRITICAL REQUIREMENTS:
-      1. Only extract entities you are 95%+ confident about
-      2. Classify entities using these EXACT types ONLY: PARTY, ADDRESS, DATE, AMOUNT, OBLIGATION, CLAUSE, JURISDICTION, TERM, CONDITION, PENALTY
-      3. Provide context (surrounding text) for each entity
-      4. Return ONLY valid JSON, no markdown formatting
+      Types: PARTY, ADDRESS, DATE, AMOUNT, OBLIGATION, CLAUSE, JURISDICTION, TERM, CONDITION, PENALTY
       
-      ENTITY TYPE DEFINITIONS:
-      - PARTY: Legal parties (persons or organizations) - e.g., "Acme Corporation", "John Smith"
-      - ADDRESS: Physical or mailing addresses - e.g., "123 Main Street, New York, NY"
-      - DATE: Important dates or deadlines - e.g., "March 1, 2026", "Start date: January 15"
-      - AMOUNT: Monetary amounts or financial terms - e.g., "$75,000", "$5,000 penalty"
-      - OBLIGATION: Legal obligations or requirements - e.g., "Employee shall perform duties diligently"
-      - CLAUSE: Contract clauses or provisions - e.g., "Termination with 30 days notice"
-      - JURISDICTION: Legal jurisdiction or governing law - e.g., "Governed by New York law"
-      - TERM: Contract term or duration - e.g., "24-month contract", "Two year period"
-      - CONDITION: Conditions precedent or subsequent - e.g., "Subject to background check"
-      - PENALTY: Penalties or liquidated damages - e.g., "$5,000 liquidated damages"
+      Rules:
+      - PARTY: Company/person names (Acme Corp, John Smith)
+      - ADDRESS: Full addresses only (123 Main St, New York)
+      - DATE: Dates (March 1, 2026)
+      - AMOUNT: Money with $ (e.g., $75,000)
+      - OBLIGATION: Duties starting with "shall" or "must"
+      - CLAUSE: Contract provisions (e.g., termination clause)
+      - JURISDICTION: Governing law mentions
+      - TERM: Duration (24 months, 2 years)
+      - CONDITION: Requirements with "subject to"
+      - PENALTY: Damages with $ amount
       
-      CLASSIFICATION RULES:
-      - "Acme Corporation" is PARTY, not person
-      - "John Smith" is PARTY, not person
-      - "123 Main Street" is ADDRESS, not person
-      - "New York" in address context is ADDRESS, not person
-      - "$75,000" is AMOUNT, not person
-      - Dates like "March 1, 2026" are DATE, not person
-      - "Start Date" is not an entity, the actual date is
+      Text:
+      #{text_sample}
       
-      DOCUMENT TEXT:
-      #{text[0..15000]}
-      
-      OUTPUT FORMAT - Return ONLY this JSON structure, no markdown:
-      {
-        "entities": [
-          {
-            "type": "PARTY",
-            "value": "Acme Corporation",
-            "context": "party of the first part, Acme Corporation, hereby agrees",
-            "confidence": 0.98
-          },
-          {
-            "type": "PARTY",
-            "value": "John Smith",
-            "context": "party of the second part, John Smith, agrees to",
-            "confidence": 0.98
-          },
-          {
-            "type": "ADDRESS",
-            "value": "123 Main Street, New York",
-            "context": "with offices located at 123 Main Street, New York",
-            "confidence": 0.95
-          },
-          {
-            "type": "DATE",
-            "value": "March 1, 2026",
-            "context": "Start date: March 1, 2026",
-            "confidence": 0.98
-          },
-          {
-            "type": "AMOUNT",
-            "value": "$75,000",
-            "context": "annual salary of $75,000",
-            "confidence": 0.98
-          }
-        ]
-      }
-      
-      IMPORTANT: Return ONLY the JSON object. Do not include markdown code blocks or any other text.
+      JSON format:
+      {"entities":[{"type":"PARTY","value":"Acme Corp","context":"","confidence":0.98}]}
     PROMPT
   end
 
   def parse_legal_entities(response)
     # Remove markdown code blocks if present
     clean_response = response.strip
-    clean_response = clean_response.gsub(/^```json\s*/, '').gsub(/^```\s*$/, '').strip
+    clean_response = clean_response.gsub(/^```json\s*/m, '').gsub(/^```\s*$/m, '').strip
+    
+    # Try to extract JSON if there's extra text
+    if clean_response =~ /\{.*"entities".*\}/m
+      clean_response = $&
+    end
     
     data = JSON.parse(clean_response)
     entities = []
     
+    # Validate entity types
+    valid_types = LEGAL_ENTITY_TYPES.keys
+    
     data['entities']&.each do |entity|
-      # Only include high-confidence entities
+      # Skip if confidence too low
       next if entity['confidence'] && entity['confidence'] < @confidence_threshold
       
+      # Validate entity type
+      entity_type = entity['type']&.upcase
+      unless valid_types.include?(entity_type)
+        puts "Warning: Invalid entity type '#{entity['type']}', skipping"
+        next
+      end
+      
       entities << {
-        entity_type: entity['type'],
+        entity_type: entity_type,
         entity_value: entity['value'],
         context: entity['context'] || '',
         confidence: entity['confidence'] || 0.95,
@@ -181,7 +151,7 @@ class EnterpriseAIService
       }
     end
     
-    puts "Parsed #{entities.length} entities from AI response"
+    puts "Parsed #{entities.length} valid entities from AI response"
     entities
   rescue JSON::ParserError => e
     audit_log('parse_error', { error: e.message, response_preview: response[0..200] })
