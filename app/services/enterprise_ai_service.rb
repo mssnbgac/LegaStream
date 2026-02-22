@@ -88,41 +88,80 @@ class EnterpriseAIService
       
       CRITICAL REQUIREMENTS:
       1. Only extract entities you are 95%+ confident about
-      2. Classify entities using these EXACT types: #{LEGAL_ENTITY_TYPES.keys.join(', ')}
+      2. Classify entities using these EXACT types ONLY: PARTY, ADDRESS, DATE, AMOUNT, OBLIGATION, CLAUSE, JURISDICTION, TERM, CONDITION, PENALTY
       3. Provide context (surrounding text) for each entity
-      4. Flag any ambiguous or uncertain extractions
+      4. Return ONLY valid JSON, no markdown formatting
       
-      ENTITY TYPES:
-      #{LEGAL_ENTITY_TYPES.map { |k, v| "- #{k}: #{v}" }.join("\n")}
+      ENTITY TYPE DEFINITIONS:
+      - PARTY: Legal parties (persons or organizations) - e.g., "Acme Corporation", "John Smith"
+      - ADDRESS: Physical or mailing addresses - e.g., "123 Main Street, New York, NY"
+      - DATE: Important dates or deadlines - e.g., "March 1, 2026", "Start date: January 15"
+      - AMOUNT: Monetary amounts or financial terms - e.g., "$75,000", "$5,000 penalty"
+      - OBLIGATION: Legal obligations or requirements - e.g., "Employee shall perform duties diligently"
+      - CLAUSE: Contract clauses or provisions - e.g., "Termination with 30 days notice"
+      - JURISDICTION: Legal jurisdiction or governing law - e.g., "Governed by New York law"
+      - TERM: Contract term or duration - e.g., "24-month contract", "Two year period"
+      - CONDITION: Conditions precedent or subsequent - e.g., "Subject to background check"
+      - PENALTY: Penalties or liquidated damages - e.g., "$5,000 liquidated damages"
+      
+      CLASSIFICATION RULES:
+      - "Acme Corporation" is PARTY, not person
+      - "John Smith" is PARTY, not person
+      - "123 Main Street" is ADDRESS, not person
+      - "New York" in address context is ADDRESS, not person
+      - "$75,000" is AMOUNT, not person
+      - Dates like "March 1, 2026" are DATE, not person
+      - "Start Date" is not an entity, the actual date is
       
       DOCUMENT TEXT:
       #{text[0..15000]}
       
-      OUTPUT FORMAT (JSON):
+      OUTPUT FORMAT - Return ONLY this JSON structure, no markdown:
       {
         "entities": [
           {
             "type": "PARTY",
             "value": "Acme Corporation",
-            "context": "...party of the first part, Acme Corporation, hereby agrees...",
-            "confidence": 0.98,
-            "location": "page 1, paragraph 2",
-            "flags": []
+            "context": "party of the first part, Acme Corporation, hereby agrees",
+            "confidence": 0.98
+          },
+          {
+            "type": "PARTY",
+            "value": "John Smith",
+            "context": "party of the second part, John Smith, agrees to",
+            "confidence": 0.98
+          },
+          {
+            "type": "ADDRESS",
+            "value": "123 Main Street, New York",
+            "context": "with offices located at 123 Main Street, New York",
+            "confidence": 0.95
+          },
+          {
+            "type": "DATE",
+            "value": "March 1, 2026",
+            "context": "Start date: March 1, 2026",
+            "confidence": 0.98
+          },
+          {
+            "type": "AMOUNT",
+            "value": "$75,000",
+            "context": "annual salary of $75,000",
+            "confidence": 0.98
           }
-        ],
-        "document_type": "contract|agreement|lease|etc",
-        "jurisdiction": "detected jurisdiction if any",
-        "critical_dates": ["list of important dates"],
-        "parties": ["list of all parties"],
-        "key_obligations": ["list of main obligations"]
+        ]
       }
       
-      ACCURACY IS CRITICAL. When in doubt, flag for human review.
+      IMPORTANT: Return ONLY the JSON object. Do not include markdown code blocks or any other text.
     PROMPT
   end
 
   def parse_legal_entities(response)
-    data = JSON.parse(response)
+    # Remove markdown code blocks if present
+    clean_response = response.strip
+    clean_response = clean_response.gsub(/^```json\s*/, '').gsub(/^```\s*$/, '').strip
+    
+    data = JSON.parse(clean_response)
     entities = []
     
     data['entities']&.each do |entity|
@@ -132,19 +171,22 @@ class EnterpriseAIService
       entities << {
         entity_type: entity['type'],
         entity_value: entity['value'],
-        context: entity['context'],
+        context: entity['context'] || '',
         confidence: entity['confidence'] || 0.95,
         metadata: {
-          location: entity['location'],
+          location: entity['location'] || '',
           flags: entity['flags'] || [],
           requires_review: entity['flags']&.any? || false
         }
       }
     end
     
+    puts "Parsed #{entities.length} entities from AI response"
     entities
   rescue JSON::ParserError => e
-    audit_log('parse_error', { error: e.message })
+    audit_log('parse_error', { error: e.message, response_preview: response[0..200] })
+    puts "JSON Parse Error: #{e.message}"
+    puts "Response preview: #{response[0..500]}"
     []
   end
 

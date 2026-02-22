@@ -9,7 +9,7 @@ require 'mail'
 require 'fileutils'
 require 'time'
 require 'dotenv/load'
-require_relative 'app/services/ai_analysis_service'
+require_relative 'app/services/enterprise_ai_service'
 
 # Force immediate output (no buffering)
 $stdout.sync = true
@@ -849,7 +849,7 @@ class ProductionServer
             puts "Starting automatic AI analysis for new document #{doc_id}"
             sleep(2) # Small delay to let upload complete
             
-            analyzer = AIAnalysisService.new(doc_id)
+            analyzer = EnterpriseAIService.new(doc_id)
             result = analyzer.analyze
             
             if result[:success]
@@ -977,7 +977,7 @@ class ProductionServer
       Thread.new do
         begin
           puts "Starting AI analysis for document #{doc_id}"
-          analyzer = AIAnalysisService.new(doc_id.to_i)
+          analyzer = EnterpriseAIService.new(doc_id.to_i)
           result = analyzer.analyze
           
           if result[:success]
