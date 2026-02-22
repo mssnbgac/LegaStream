@@ -844,23 +844,29 @@ class ProductionServer
         doc_id = @db.last_insert_row_id
         
         # Start REAL AI analysis
+        puts "📊 Queuing automatic AI analysis for document #{doc_id}"
         Thread.new do
           begin
-            puts "Starting automatic AI analysis for new document #{doc_id}"
+            puts "🔬 Starting automatic AI analysis for new document #{doc_id}"
             sleep(2) # Small delay to let upload complete
             
+            puts "🤖 Initializing EnterpriseAIService for document #{doc_id}"
             analyzer = EnterpriseAIService.new(doc_id)
+            
+            puts "⚡ Running analysis..."
             result = analyzer.analyze
             
             if result[:success]
-              ai_type = result[:using_real_ai] ? 'OpenAI' : 'fallback'
-              puts "Automatic analysis completed for document #{doc_id} using #{ai_type}: #{result[:entities]&.length || 0} entities"
+              entity_count = result[:entities]&.length || 0
+              puts "✅ Automatic analysis completed for document #{doc_id}: #{entity_count} entities extracted"
             else
-              puts "Automatic analysis failed for document #{doc_id}: #{result[:error]}"
+              puts "❌ Automatic analysis failed for document #{doc_id}: #{result[:error]}"
             end
           rescue => e
-            puts "Automatic analysis error for document #{doc_id}: #{e.message}"
-            puts e.backtrace.first(3)
+            puts "💥 Automatic analysis error for document #{doc_id}:"
+            puts "   Error: #{e.class} - #{e.message}"
+            puts "   Backtrace:"
+            puts e.backtrace.first(5).map { |line| "     #{line}" }.join("\n")
           end
         end
         
