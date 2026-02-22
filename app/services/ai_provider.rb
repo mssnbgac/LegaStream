@@ -121,16 +121,28 @@ class AIProvider
   # Google Gemini Implementation
   def extract_with_gemini(text)
     # Limit text to avoid token issues
-    text_sample = text[0..3000]
+    text_sample = text[0..5000]
     
     prompt = <<~PROMPT
-      Extract entities from this legal document. Return ONLY a JSON array with this exact format:
-      [{"type": "person", "value": "John Doe", "context": "Party to agreement"}, ...]
+      Extract legal entities from this document. Return ONLY JSON array.
       
-      Entity types: person, organization, date, monetary, location, clause, obligation
+      Use these 10 entity types:
+      - PARTY: People or organizations (e.g., "Acme Corp", "John Smith")
+      - ADDRESS: Physical addresses (e.g., "123 Main St, New York")
+      - DATE: Dates (e.g., "March 1, 2026")
+      - AMOUNT: Money (e.g., "$75,000")
+      - OBLIGATION: Legal duties (e.g., "shall perform duties")
+      - CLAUSE: Contract terms (e.g., "30 days notice")
+      - JURISDICTION: Governing law (e.g., "New York law")
+      - TERM: Duration (e.g., "24 months")
+      - CONDITION: Requirements (e.g., "subject to approval")
+      - PENALTY: Damages (e.g., "$5,000 penalty")
       
-      Document text:
+      Document:
       #{text_sample}
+      
+      Return JSON array (no markdown):
+      [{"type":"PARTY","value":"Acme Corp","context":"party to agreement","confidence":0.95}]
     PROMPT
 
     response = call_gemini_api(prompt)
