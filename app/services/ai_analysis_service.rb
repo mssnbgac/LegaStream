@@ -160,10 +160,17 @@ class AIAnalysisService
       all_entities.concat(non_party_fallback)
     end
     
-    log_step("Total entities: #{all_entities.length}")
+    # Remove duplicates based on type and value
+    unique_entities = all_entities.uniq do |e|
+      type = e['type'] || e[:type]
+      value = e['value'] || e[:value]
+      "#{type}:#{value}".downcase
+    end
+    
+    log_step("Total entities after deduplication: #{unique_entities.length} (removed #{all_entities.length - unique_entities.length} duplicates)")
     
     # Save all entities to database
-    all_entities.each do |entity|
+    unique_entities.each do |entity|
       type = entity['type'] || entity[:type]
       value = entity['value'] || entity[:value]
       context = entity['context'] || entity[:context] || ''
@@ -172,7 +179,7 @@ class AIAnalysisService
       save_entity(type, value, context, confidence)
     end
     
-    all_entities
+    unique_entities
   rescue => e
     log_step("Hybrid extraction failed: #{e.message}")
     log_step("Error class: #{e.class}")
