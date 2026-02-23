@@ -124,37 +124,40 @@ class AIProvider
     text_sample = text[0..4000]
     
     prompt = <<~PROMPT
-      Extract legal entities from this document. Return ONLY a valid JSON array with no additional text, explanations, or markdown formatting.
+      Extract legal entities from this document. Return ONLY a valid JSON array.
 
-      Entity types to extract:
-      - PARTY: ONLY people or organizations that are parties to the agreement (signatories, contracting parties). DO NOT include addresses, street names, or locations as parties.
-      - ADDRESS: Physical addresses (street addresses, office locations)
-      - DATE: Dates in any format
-      - AMOUNT: Money amounts with context
-      - OBLIGATION: Legal duties (phrases with "shall", "must", "will")
-      - CLAUSE: Contract terms (termination, confidentiality, notice periods)
-      - JURISDICTION: Governing law references
-      - TERM: Duration or time periods
-      - CONDITION: Conditional requirements (subject to, unless, provided that)
-      - PENALTY: Damages, penalties, fines
+      CRITICAL RULES FOR PARTY EXTRACTION:
+      - ONLY extract the actual contracting parties (who is signing the agreement)
+      - Extract ONLY clean company names: "Acme Corporation", "Tech Solutions LLC"
+      - Extract ONLY clean person names: "John Smith", "Mary Johnson"
+      - DO NOT extract sentence fragments like "This Agreement is between Acme Corporation"
+      - DO NOT extract obligations like "Employee shall comply with company"
+      - DO NOT extract titles like "Authorized Representative"
+      - DO NOT extract locations like "New York", "Los Angeles"
+      - DO NOT extract addresses or street names
+      - Look for parties in "between X and Y" clauses or signature blocks
 
-      IMPORTANT for PARTY extraction:
-      - ONLY extract actual parties to the agreement (companies, individuals who are signing)
-      - DO NOT extract street names like "Main Street" or "Oak Avenue" as parties
-      - DO NOT extract city names or locations as parties
-      - Look for company indicators: Corporation, Corp, Inc, LLC, Ltd, Limited, Company
-      - Look for person names in context of "between X and Y" or signature blocks
+      Entity types:
+      - PARTY: ONLY actual contracting parties (clean names only)
+      - ADDRESS: Physical addresses
+      - DATE: Dates
+      - AMOUNT: Money amounts
+      - OBLIGATION: Legal duties
+      - CLAUSE: Contract terms
+      - JURISDICTION: Governing law
+      - TERM: Duration
+      - CONDITION: Requirements
+      - PENALTY: Damages
 
       Document:
       #{text_sample}
 
-      Response format - return ONLY this JSON array structure:
-      [{"type":"PARTY","value":"Acme Corporation","context":"employer","confidence":0.95},{"type":"DATE","value":"March 1, 2026","context":"start date","confidence":0.92}]
+      Return ONLY JSON array:
+      [{"type":"PARTY","value":"Acme Corporation","context":"employer","confidence":0.95}]
     PROMPT
 
     response = call_gemini_api(prompt)
     
-    # If response is empty or nil, return empty array immediately
     if response.nil? || response.empty?
       puts "[AIProvider] Gemini returned empty response"
       return []

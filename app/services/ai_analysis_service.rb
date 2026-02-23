@@ -179,46 +179,62 @@ class AIAnalysisService
       address_parts << match
     end
     
-    # Common words to exclude from party detection
-    common_words = %w[The This That These Those Report Summary Document Analysis Section Chapter Page Table Figure Appendix Agreement Contract Whereas Herein Hereby Therefore Witnesseth Recitals Article Clause Paragraph Schedule Exhibit Annex Attachment Addendum Amendment Modification Extension Renewal Termination Expiration Effective Date Start End Beginning Conclusion]
+    # Words/phrases to exclude from party detection
+    exclude_words = %w[The This That These Those Report Summary Document Analysis Section Chapter Page Table Figure Appendix Agreement Contract Whereas Herein Hereby Therefore Witnesseth Recitals Article Clause Paragraph Schedule Exhibit Annex Attachment Addendum Amendment Modification Extension Renewal Termination Expiration Effective Date Start End Beginning Conclusion Employee Employer Party Contractor Company Individual Authorized Representative Signature Witness Notary Between Shall Must Will Agrees Subject Provided Unless]
     
-    # Extract company names (high confidence)
-    text.scan(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Partnership|LLP|PC|PA|PLC|GmbH|AG|SA|SPA|BV|NV)\b/i) do |match|
-      # Skip if it's part of an address
-      next if address_parts.any? { |addr| addr.include?(match) }
-      next if match.length < 5
+    # Location names to exclude
+    locations = %w[New York Los Angeles Chicago Houston Phoenix Philadelphia San Antonio San Diego Dallas San Jose Austin Jacksonville Fort Worth Columbus Charlotte San Francisco Indianapolis Seattle Denver Washington Boston Nashville Detroit Oklahoma Memphis Portland Las Vegas Louisville Baltimore Milwaukee Albuquerque Tucson Fresno Sacramento Kansas City Mesa Virginia Beach Atlanta Colorado Springs Omaha Raleigh Miami Oakland Minneapolis Tulsa Cleveland Wichita Arlington Texas California Florida Illinois Pennsylvania Ohio Georgia North Carolina Michigan New Jersey Virginia Washington Massachusetts Arizona Indiana Tennessee Missouri Maryland Wisconsin Minnesota Colorado Alabama South Carolina Louisiana Kentucky Oregon Oklahoma Connecticut Utah Iowa Nevada Arkansas Mississippi Kansas New Mexico Nebraska West Virginia Idaho Hawaii New Hampshire Maine Montana Rhode Island Delaware South Dakota North Dakota Alaska Vermont Wyoming]
+    
+    # Extract company names (high confidence) - must have company indicator
+    text.scan(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(Corporation|Corp\.?|Inc\.?|LLC|Ltd\.?|Limited|Company|Co\.?|Partnership|LLP|PC|PA|PLC)\b/i) do |name, indicator|
+      full_name = "#{name} #{indicator}".strip
       
-      entities << { type: 'PARTY', value: match, context: 'company party to agreement' }
-      save_entity('PARTY', match, 'company party to agreement', 0.95)
+      # Skip if it's part of an address
+      next if address_parts.any? { |addr| addr.include?(full_name) }
+      
+      # Skip if it's too short
+      next if full_name.length < 5
+      
+      # Skip if it contains excluded words
+      next if exclude_words.any? { |w| full_name.include?(w) }
+      
+      # Skip if it's a location
+      next if locations.any? { |loc| full_name.include?(loc) }
+      
+      entities << { type: 'PARTY', value: full_name, context: 'company party to agreement' }
+      save_entity('PARTY', full_name, 'company party to agreement', 0.95)
     end
     
-    # Extract person names (2-3 words, capitalized, not in common words)
-    text.scan(/\b[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b/) do |match|
-      words = match.split
+    # Extract person names (2-3 words, capitalized) - very strict
+    text.scan(/\b([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\b/) do |first, last, middle|
+      # Build full name
+      full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
       
-      # Skip if any word is in common words list
-      next if words.any? { |w| common_words.include?(w) }
+      # Skip if any word is in exclude list
+      words = full_name.split
+      next if words.any? { |w| exclude_words.include?(w) }
       
       # Skip if it's part of an address
-      next if address_parts.any? { |addr| addr.include?(match) }
+      next if address_parts.any? { |addr| addr.include?(full_name) }
       
       # Skip if it contains street indicators
-      next if match.match?(/\b(?:Street|Avenue|Road|Boulevard|Drive|Lane|Crescent|Circle|Court)\b/i)
+      next if full_name.match?(/\b(?:Street|Avenue|Road|Boulevard|Drive|Lane|Crescent|Circle|Court)\b/i)
       
-      # Skip very short matches
-      next if match.length < 5
+      # Skip if it's a location
+      next if locations.any? { |loc| full_name.include?(loc) }
       
-      # Skip if it's all caps (likely acronym or title)
-      next if match == match.upcase
+      # Skip if it's all caps (likely acronym)
+      next if full_name == full_name.upcase
       
-      # Skip if it's a single word repeated
-      next if words.length == 2 && words[0] == words[1]
+      # Skip if words are too short (< 3 chars each)
+      next if words.any? { |w| w.length < 3 }
       
-      # Only include if it looks like a person name (First Last or First Middle Last)
-      if words.length >= 2 && words.length <= 3
-        entities << { type: 'PARTY', value: match, context: 'individual party to agreement' }
-        save_entity('PARTY', match, 'individual party to agreement', 0.90)
-      end
+      # Skip if it appears in a sentence context (not a standalone name)
+      # Look for common sentence patterns
+      next if text.match?(/(?:between|by|from|with|to|for|of|in|at|on)\s+#{Regexp.escape(full_name)}\s+(?:and|or|shall|must|will|agrees|is|was|has|have)/i)
+      
+      entities << { type: 'PARTY', value: full_name, context: 'individual party to agreement' }
+      save_entity('PARTY', full_name, 'individual party to agreement', 0.90)
     end
     
     # 2. ADDRESS - Physical addresses
