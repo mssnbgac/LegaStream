@@ -175,6 +175,9 @@ class AIAnalysisService
     # Words to exclude from party names
     exclude_words = %w[For AND OR At In On With Between From To By Of The This That Agreement Contract Shall Must Will Employee Employer Party Parties Authorized Representative Signature Witness transactions]
     
+    # Generic terms that are NEVER parties
+    generic_terms = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Naira Dollar Only Date Time Period Year Month Day Week Second Third Fourth Fifth Sixth Seventh Eighth Ninth Tenth]
+    
     # Nigerian and US states/locations to exclude
     locations = %w[Lagos Oyo Niger Imo Abia Adamawa Akwa Ibom Anambra Bauchi Bayelsa Benue Borno Cross River Delta Ebonyi Edo Ekiti Enugu Gombe Jigawa Kaduna Kano Katsina Kebbi Kogi Kwara Nassarawa Ondo Osun Ogun Plateau Rivers Sokoto Taraba Yobe Zamfara Abuja Wuse Zone Victoria Island Ikeja Ibadan Minna New York California Texas Florida Illinois Pennsylvania Ohio Georgia North Carolina Michigan]
     
@@ -188,14 +191,24 @@ class AIAnalysisService
       # Only filter PARTY entities
       next entity unless type == 'PARTY'
       
-      # Remove leading/trailing excluded words
+      # STRICT CHECK: Skip if it contains ANY generic term
+      next nil if generic_terms.any? { |term| value.include?(term) }
+      
+      # Skip if it's a multi-word phrase with common words (likely descriptive, not a name)
       words = value.split
+      common_words = %w[First Second Third Fourth Fifth Last Next Previous Current New Old Payment Transfer Bank Account Method Session Class Term Amount Number Only]
+      next nil if words.length >= 2 && words.any? { |w| common_words.include?(w) }
+      
+      # Remove leading/trailing excluded words
       words = words.drop_while { |w| exclude_words.include?(w) }
       words = words.reverse.drop_while { |w| exclude_words.include?(w) }.reverse
       cleaned_value = words.join(' ')
       
       # Skip if empty after cleaning
       next nil if cleaned_value.empty?
+      
+      # Skip if less than 2 characters (too short to be a real name)
+      next nil if cleaned_value.length < 2
       
       # Skip if it's a location
       next nil if locations.any? { |loc| cleaned_value.include?(loc) && !cleaned_value.match?(/\b(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Partnership|LLP|PC|PA|PLC|Plc|Bank)\b/i) }
@@ -211,6 +224,12 @@ class AIAnalysisService
       
       # Skip if it's "Republic" without company indicator
       next nil if cleaned_value.match?(/\bRepublic\b/i) && !cleaned_value.match?(/\b(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Bank)\b/i)
+      
+      # POSITIVE CHECK: Must be either a company name OR a person name
+      is_company = cleaned_value.match?(/\b(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Partnership|LLP|PC|PA|PLC|Plc|Bank|Solutions|Technologies|Services|Group|Holdings|Enterprises)\b/i)
+      is_person = cleaned_value.split.length >= 2 && cleaned_value.split.all? { |w| w.match?(/^[A-Z][a-z]+$/) }
+      
+      next nil unless is_company || is_person
       
       # Update the entity with cleaned value
       entity['value'] = cleaned_value

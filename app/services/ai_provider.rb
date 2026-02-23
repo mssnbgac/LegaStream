@@ -120,51 +120,59 @@ class AIProvider
 
   # Google Gemini Implementation
   def extract_with_gemini(text)
-    # Limit text to avoid token issues
-    text_sample = text[0..4000]
-    
-    prompt = <<~PROMPT
-      Extract legal entities from this document. Return ONLY a valid JSON array.
+      # Limit text to avoid token issues
+      text_sample = text[0..4000]
 
-      CRITICAL RULES FOR PARTY EXTRACTION:
-      - ONLY extract the actual contracting parties (who is signing the agreement)
-      - Extract ONLY clean company names: "Acme Corporation", "Tech Solutions LLC"
-      - Extract ONLY clean person names: "John Smith", "Mary Johnson"
-      - DO NOT extract sentence fragments like "This Agreement is between Acme Corporation"
-      - DO NOT extract obligations like "Employee shall comply with company"
-      - DO NOT extract titles like "Authorized Representative"
-      - DO NOT extract locations like "New York", "Los Angeles"
-      - DO NOT extract addresses or street names
-      - Look for parties in "between X and Y" clauses or signature blocks
+      prompt = <<~PROMPT
+        You are a legal document analyzer. Extract ONLY the actual contracting parties from this document.
 
-      Entity types:
-      - PARTY: ONLY actual contracting parties (clean names only)
-      - ADDRESS: Physical addresses
-      - DATE: Dates
-      - AMOUNT: Money amounts
-      - OBLIGATION: Legal duties
-      - CLAUSE: Contract terms
-      - JURISDICTION: Governing law
-      - TERM: Duration
-      - CONDITION: Requirements
-      - PENALTY: Damages
+        STRICT RULES FOR PARTY EXTRACTION:
+        1. ONLY extract names of people or organizations who are SIGNING the agreement
+        2. Look for parties in:
+           - "This Agreement is between [PARTY A] and [PARTY B]"
+           - Signature blocks at the end
+           - "The parties to this agreement are..."
+        3. Extract ONLY clean names:
+           - Companies: "Acme Corporation", "Tech Solutions LLC", "BrightPath Limited"
+           - People: "John Smith", "Mary Johnson", "Abdul Mai"
+        4. DO NOT extract:
+           - Generic terms: "Student Name", "Academic Session", "First Term"
+           - Financial terms: "Payment Method", "Account Number", "Transfer"
+           - Descriptive phrases: "First Class Term", "Payment Bank Method"
+           - Currencies: "Naira", "Dollar"
+           - Sentence fragments or partial phrases
+           - Anything that is not a proper name
 
-      Document:
-      #{text_sample}
+        For OTHER entity types, extract normally:
+        - ADDRESS: Physical addresses only
+        - DATE: Dates in any format
+        - AMOUNT: Money amounts with currency symbols
+        - OBLIGATION: Legal duties (shall, must, will)
+        - CLAUSE: Contract terms and conditions
+        - JURISDICTION: Governing law references
+        - TERM: Duration/time periods
+        - CONDITION: Requirements and conditions
+        - PENALTY: Damages and penalties
 
-      Return ONLY JSON array:
-      [{"type":"PARTY","value":"Acme Corporation","context":"employer","confidence":0.95}]
-    PROMPT
+        Document:
+        #{text_sample}
 
-    response = call_gemini_api(prompt)
-    
-    if response.nil? || response.empty?
-      puts "[AIProvider] Gemini returned empty response"
-      return []
+        Return ONLY a valid JSON array. Each entity must have: type, value, context, confidence.
+        Example: [{"type":"PARTY","value":"Acme Corporation","context":"employer","confidence":0.95}]
+
+        If no clear parties are found, return an empty array for PARTY type.
+      PROMPT
+
+      response = call_gemini_api(prompt)
+
+      if response.nil? || response.empty?
+        puts "[AIProvider] Gemini returned empty response"
+        return []
+      end
+
+      parse_json_response(response)
     end
-    
-    parse_json_response(response)
-  end
+
 
   def compliance_with_gemini(text)
     prompt = <<~PROMPT
