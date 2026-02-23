@@ -154,17 +154,68 @@ class AIAnalysisService
     
     log_step("AI extracted #{entities_data.length} entities")
     
+    # Filter and validate entities before saving
+    valid_entities = filter_valid_parties(entities_data)
+    log_step("After filtering: #{valid_entities.length} valid entities")
+    
     # Save entities to database
-    entities_data.each do |entity|
+    valid_entities.each do |entity|
       confidence = entity['confidence'] || 0.90
       save_entity(entity['type'], entity['value'], entity['context'] || '', confidence)
     end
     
-    entities_data
+    valid_entities
   rescue => e
     log_step("AI entity extraction failed: #{e.message}")
     log_step("Error class: #{e.class}")
     extract_entities_fallback(text)
+  end
+  
+  def filter_valid_parties(entities)
+    # Words to exclude from party names
+    exclude_words = %w[For AND OR At In On With Between From To By Of The This That Agreement Contract Shall Must Will Employee Employer Party Parties Authorized Representative Signature Witness transactions]
+    
+    # Nigerian and US states/locations to exclude
+    locations = %w[Lagos Oyo Niger Imo Abia Adamawa Akwa Ibom Anambra Bauchi Bayelsa Benue Borno Cross River Delta Ebonyi Edo Ekiti Enugu Gombe Jigawa Kaduna Kano Katsina Kebbi Kogi Kwara Nassarawa Ondo Osun Ogun Plateau Rivers Sokoto Taraba Yobe Zamfara Abuja Wuse Zone Victoria Island Ikeja Ibadan Minna New York California Texas Florida Illinois Pennsylvania Ohio Georgia North Carolina Michigan]
+    
+    # Job titles to exclude
+    job_titles = %w[Administrator Officer Manager Director CEO CFO President Secretary Treasurer Chairman Vice President Executive Assistant Coordinator Supervisor]
+    
+    entities.select do |entity|
+      value = entity['value'].to_s.strip
+      type = entity['type'].to_s
+      
+      # Only filter PARTY entities
+      next entity unless type == 'PARTY'
+      
+      # Remove leading/trailing excluded words
+      words = value.split
+      words = words.drop_while { |w| exclude_words.include?(w) }
+      words = words.reverse.drop_while { |w| exclude_words.include?(w) }.reverse
+      cleaned_value = words.join(' ')
+      
+      # Skip if empty after cleaning
+      next nil if cleaned_value.empty?
+      
+      # Skip if it's a location
+      next nil if locations.any? { |loc| cleaned_value.include?(loc) && !cleaned_value.match?(/\b(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Partnership|LLP|PC|PA|PLC|Plc|Bank)\b/i) }
+      
+      # Skip if it's just a job title
+      next nil if job_titles.any? { |title| cleaned_value == title || cleaned_value.end_with?(title) }
+      
+      # Skip if it contains "State" without a company indicator
+      next nil if cleaned_value.match?(/\bState\b/i) && !cleaned_value.match?(/\b(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Bank)\b/i)
+      
+      # Skip if it's a number phrase
+      next nil if cleaned_value.match?(/^(?:Five|Ten|Twenty|Thirty|Hundred|Thousand|Million)\b/i)
+      
+      # Skip if it's "Republic" without company indicator
+      next nil if cleaned_value.match?(/\bRepublic\b/i) && !cleaned_value.match?(/\b(?:Corporation|Corp|Inc|LLC|Ltd|Limited|Company|Co|Bank)\b/i)
+      
+      # Update the entity with cleaned value
+      entity['value'] = cleaned_value
+      entity
+    end.compact
   end
 
   def extract_entities_fallback(text)
