@@ -138,9 +138,9 @@ class AIAnalysisService
     # HYBRID APPROACH: Use regex for PARTY (more accurate), AI for everything else
     all_entities = []
     
-    # Step 1: Extract PARTY entities using strict regex (fallback method)
+    # Step 1: Extract PARTY entities using strict regex (NO DATABASE SAVING YET)
     log_step("Extracting PARTY entities using strict regex patterns...")
-    party_entities = extract_parties_strict(text)
+    party_entities = extract_parties_strict_no_save(text)
     log_step("Found #{party_entities.length} PARTY entities via regex")
     all_entities.concat(party_entities)
     
@@ -155,39 +155,54 @@ class AIAnalysisService
       all_entities.concat(non_party_entities)
     else
       log_step("AI returned no entities, using fallback for non-PARTY types")
-      fallback_entities = extract_entities_fallback(text)
+      fallback_entities = extract_entities_fallback_no_save(text)
       non_party_fallback = fallback_entities.reject { |e| e[:type] == 'PARTY' }
       all_entities.concat(non_party_fallback)
     end
     
-    # Remove duplicates based on type and value
+    # Remove duplicates based on NORMALIZED type and value (trim, lowercase, remove punctuation)
     unique_entities = all_entities.uniq do |e|
       type = e['type'] || e[:type]
-      value = e['value'] || e[:value]
-      "#{type}:#{value}".downcase
+      value = (e['value'] || e[:value]).to_s.strip.downcase.gsub(/[[:punct:]]/, '')
+      "#{type}:#{value}"
     end
     
     log_step("Total entities after deduplication: #{unique_entities.length} (removed #{all_entities.length - unique_entities.length} duplicates)")
     
-    # Save all entities to database
+    # NOW save all unique entities to database (ONLY ONCE)
     unique_entities.each do |entity|
       type = entity['type'] || entity[:type]
       value = entity['value'] || entity[:value]
       context = entity['context'] || entity[:context] || ''
       confidence = entity['confidence'] || entity[:confidence] || 0.90
       
-      save_entity(type, value, context, confidence)
+      # Check if entity already exists in database before saving
+      save_entity_if_not_exists(type, value, context, confidence)
     end
     
     unique_entities
   rescue => e
     log_step("Hybrid extraction failed: #{e.message}")
     log_step("Error class: #{e.class}")
-    extract_entities_fallback(text)
+    extract_entities_fallback_no_save(text)
   end
   
   def extract_parties_strict(text)
     # ULTRA-STRICT PARTY EXTRACTION - Only actual names, no surrounding text
+    # This version SAVES to database (used by fallback)
+    parties = extract_parties_strict_no_save(text)
+    
+    # Save to database
+    parties.each do |party|
+      save_entity(party[:type], party[:value], party[:context], party[:confidence])
+    end
+    
+    parties
+  end
+  
+  def extract_parties_strict_no_save(text)
+    # ULTRA-STRICT PARTY EXTRACTION - Only actual names, no surrounding text
+    # This version does NOT save to database (used by hybrid extraction)
     parties = []
     
     # Extract company names (must have company indicator)
@@ -199,7 +214,7 @@ class AIAnalysisService
       next if full_name.length < 5
       
       # Skip if contains ANY generic/common words
-      skip_words = %w[This That These Those Agreement Contract Employee Employer Party Parties Between And Or With From To By For Of The In On At As Is Are Was Were Be Been Being Have Has Had Do Does Did Will Would Should Could May Might Must Can Shall Student Academic Session Payment Transfer Account Amount First Second Third Class Term Method Bank Number Nigeria Naira Only Representative Authorized Signature Signed Name Date Time]
+      skip_words = %w[This That These Those Agreement Contract Employee Employer Party Parties Between And Or With From To By For Of The In On At As Is Are Was Were Be Been Being Have Has Had Do Does Did Will Would Should Could May Might Must Can Shall Student Academic Session Payment Transfer Account Amount First Second Third Class Term Method Bank Number Nigeria Naira Only Representative Authorized Signature Signed Name Date Time Provide Consulting Professional Business Services Transactions]
       next if skip_words.any? { |w| full_name.split.include?(w) }
       
       parties << { type: 'PARTY', value: full_name, context: 'company party to agreement', confidence: 0.95 }
@@ -318,6 +333,20 @@ class AIAnalysisService
   def extract_entities_fallback(text)
     log_step("Using fallback entity extraction with legal-specific types")
     
+    # Get entities without saving
+    entities = extract_entities_fallback_no_save(text)
+    
+    # Save to database
+    entities.each do |entity|
+      save_entity(entity[:type], entity[:value], entity[:context], entity[:confidence] || 0.85)
+    end
+    
+    entities
+  end
+  
+  def extract_entities_fallback_no_save(text)
+    log_step("Using fallback entity extraction with legal-specific types (no save)")
+    
     entities = []
     
     # 1. PARTY - People or organizations (proper names, companies)
@@ -349,63 +378,30 @@ class AIAnalysisService
       # Skip if it's a location
       next if locations.any? { |loc| full_name.include?(loc) }
       
-      entities << { type: 'PARTY', value: full_name, context: 'company party to agreement' }
-      save_entity('PARTY', full_name, 'company party to agreement', 0.95)
+      entities << { type: 'PARTY', value: full_name, context: 'company party to agreement', confidence: 0.95 }
     end
     
-    # Extract person names (2-3 words, capitalized) - very strict
-    text.scan(/\b([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\b/) do |first, last, middle|
-      # Build full name
-      full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
-      
-      # Skip if any word is in exclude list
-      words = full_name.split
-      next if words.any? { |w| exclude_words.include?(w) }
-      
-      # Skip if it's part of an address
-      next if address_parts.any? { |addr| addr.include?(full_name) }
-      
-      # Skip if it contains street indicators
-      next if full_name.match?(/\b(?:Street|Avenue|Road|Boulevard|Drive|Lane|Crescent|Circle|Court)\b/i)
-      
-      # Skip if it's a location
-      next if locations.any? { |loc| full_name.include?(loc) }
-      
-      # Skip if it's all caps (likely acronym)
-      next if full_name == full_name.upcase
-      
-      # Skip if words are too short (< 3 chars each)
-      next if words.any? { |w| w.length < 3 }
-      
-      # Skip if it appears in a sentence context (not a standalone name)
-      # Look for common sentence patterns
-      next if text.match?(/(?:between|by|from|with|to|for|of|in|at|on)\s+#{Regexp.escape(full_name)}\s+(?:and|or|shall|must|will|agrees|is|was|has|have)/i)
-      
-      entities << { type: 'PARTY', value: full_name, context: 'individual party to agreement' }
-      save_entity('PARTY', full_name, 'individual party to agreement', 0.90)
-    end
+    # NOTE: Person name extraction removed from fallback - unreliable
+    # Only company names are extracted in fallback mode
+    # Person names should only come from AI extraction
     
     # 2. ADDRESS - Physical addresses
     text.scan(/\b\d+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Crescent|Circle|Court|Ct)(?:,?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)?/i) do |match|
-      entities << { type: 'ADDRESS', value: match, context: 'physical address' }
-      save_entity('ADDRESS', match, 'physical address', 0.88)
+      entities << { type: 'ADDRESS', value: match, context: 'physical address', confidence: 0.88 }
     end
     
     # 3. DATE - Dates in various formats
     text.scan(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b/i) do |match|
-      entities << { type: 'DATE', value: match, context: 'date in document' }
-      save_entity('DATE', match, 'date in document', 0.92)
+      entities << { type: 'DATE', value: match, context: 'date in document', confidence: 0.92 }
     end
     
     text.scan(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/) do |match|
-      entities << { type: 'DATE', value: match, context: 'date in document' }
-      save_entity('DATE', match, 'date in document', 0.90)
+      entities << { type: 'DATE', value: match, context: 'date in document', confidence: 0.90 }
     end
     
     # Extract date phrases
     text.scan(/(?:Start date|Effective date|Commencement date|Termination date|Expiration date):\s*[^.]+/i) do |match|
-      entities << { type: 'DATE', value: match, context: 'contract date' }
-      save_entity('DATE', match, 'contract date', 0.90)
+      entities << { type: 'DATE', value: match, context: 'contract date', confidence: 0.90 }
     end
     
     # 4. AMOUNT - Money and compensation
@@ -418,66 +414,55 @@ class AIAnalysisService
         'monetary amount'
       end
       
-      entities << { type: 'AMOUNT', value: match, context: context }
-      save_entity('AMOUNT', match, context, 0.95)
+      entities << { type: 'AMOUNT', value: match, context: context, confidence: 0.95 }
     end
     
     # 5. OBLIGATION - Legal duties (shall, must, will)
     text.scan(/(?:Employee|Employer|Party|Contractor|Company|Individual)\s+(?:shall|must|will|agrees to)\s+[^.]{10,100}\./i) do |match|
-      entities << { type: 'OBLIGATION', value: match.strip, context: 'legal obligation' }
-      save_entity('OBLIGATION', match.strip, 'legal obligation', 0.85)
+      entities << { type: 'OBLIGATION', value: match.strip, context: 'legal obligation', confidence: 0.85 }
     end
     
     # 6. CLAUSE - Contract terms
     text.scan(/(?:Termination|Confidentiality|Non-disclosure|Non-compete|Severance|Notice)\s+(?:with|of|clause|provision)[^.]{10,80}\./i) do |match|
-      entities << { type: 'CLAUSE', value: match.strip, context: 'contract clause' }
-      save_entity('CLAUSE', match.strip, 'contract clause', 0.88)
+      entities << { type: 'CLAUSE', value: match.strip, context: 'contract clause', confidence: 0.88 }
     end
     
     # Extract notice periods
     text.scan(/\b\d+\s*days?\s+(?:notice|written notice)/i) do |match|
-      entities << { type: 'CLAUSE', value: match, context: 'notice requirement' }
-      save_entity('CLAUSE', match, 'notice requirement', 0.90)
+      entities << { type: 'CLAUSE', value: match, context: 'notice requirement', confidence: 0.90 }
     end
     
     # 7. JURISDICTION - Governing law
     text.scan(/(?:Governed by|Subject to|Under)\s+(?:the\s+)?(?:laws?\s+of\s+)?(?:the\s+)?(?:State\s+of\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?/i) do |match|
-      entities << { type: 'JURISDICTION', value: match, context: 'governing law' }
-      save_entity('JURISDICTION', match, 'governing law', 0.90)
+      entities << { type: 'JURISDICTION', value: match, context: 'governing law', confidence: 0.90 }
     end
     
     # Extract state/country references in legal context
     text.scan(/\b(?:State|Commonwealth|Republic)\s+of\s+[A-Z][a-z]+/i) do |match|
-      entities << { type: 'JURISDICTION', value: match, context: 'jurisdiction' }
-      save_entity('JURISDICTION', match, 'jurisdiction', 0.88)
+      entities << { type: 'JURISDICTION', value: match, context: 'jurisdiction', confidence: 0.88 }
     end
     
     # 8. TERM - Duration
     text.scan(/\b\d+[-\s](?:month|year|day|week)s?\s+(?:contract|term|period|duration)/i) do |match|
-      entities << { type: 'TERM', value: match, context: 'contract duration' }
-      save_entity('TERM', match, 'contract duration', 0.90)
+      entities << { type: 'TERM', value: match, context: 'contract duration', confidence: 0.90 }
     end
     
     text.scan(/(?:Period|Term|Duration)\s+of\s+\d+\s+(?:months?|years?|days?)/i) do |match|
-      entities << { type: 'TERM', value: match, context: 'time period' }
-      save_entity('TERM', match, 'time period', 0.88)
+      entities << { type: 'TERM', value: match, context: 'time period', confidence: 0.88 }
     end
     
     # 9. CONDITION - Requirements
     text.scan(/(?:Subject to|Conditional upon|Provided that|Unless)[^.]{10,80}\./i) do |match|
-      entities << { type: 'CONDITION', value: match.strip, context: 'conditional requirement' }
-      save_entity('CONDITION', match.strip, 'conditional requirement', 0.80)
+      entities << { type: 'CONDITION', value: match.strip, context: 'conditional requirement', confidence: 0.80 }
     end
     
     # 10. PENALTY - Damages and penalties
     text.scan(/(?:Liquidated damages|Penalty|Fine)\s+of\s+\$[\d,]+/i) do |match|
-      entities << { type: 'PENALTY', value: match, context: 'penalty amount' }
-      save_entity('PENALTY', match, 'penalty amount', 0.95)
+      entities << { type: 'PENALTY', value: match, context: 'penalty amount', confidence: 0.95 }
     end
     
     text.scan(/\$[\d,]+\s+(?:liquidated damages|penalty|fine)/i) do |match|
-      entities << { type: 'PENALTY', value: match, context: 'penalty for breach' }
-      save_entity('PENALTY', match, 'penalty for breach', 0.95)
+      entities << { type: 'PENALTY', value: match, context: 'penalty for breach', confidence: 0.95 }
     end
     
     entities.uniq { |e| [e[:type], e[:value]] }
@@ -643,6 +628,39 @@ class AIAnalysisService
       "INSERT INTO entities (document_id, entity_type, entity_value, context, confidence) VALUES (?, ?, ?, ?, ?)",
       [@document_id, entity_type, entity_value, context, confidence]
     )
+    db.close
+  rescue => e
+    log_step("Failed to save entity: #{e.message}")
+  end
+  
+  def save_entity_if_not_exists(entity_type, entity_value, context, confidence = 0.85)
+    db = SQLite3::Database.new('storage/legastream.db')
+    
+    # Normalize value for comparison (trim, lowercase, remove punctuation and spaces)
+    normalized_value = entity_value.to_s.strip.downcase.gsub(/[[:punct:]\s]/, '')
+    
+    # Check if entity already exists (case-insensitive, punctuation-insensitive)
+    # Get all entities of this type for this document and check in Ruby
+    existing_entities = db.execute(
+      "SELECT id, entity_value FROM entities WHERE document_id = ? AND entity_type = ?",
+      [@document_id, entity_type]
+    )
+    
+    # Check if any existing entity matches when normalized
+    already_exists = existing_entities.any? do |e|
+      existing_normalized = e['entity_value'].to_s.strip.downcase.gsub(/[[:punct:]\s]/, '')
+      existing_normalized == normalized_value
+    end
+    
+    if already_exists
+      log_step("Skipping duplicate entity: #{entity_type} - #{entity_value}")
+    else
+      db.execute(
+        "INSERT INTO entities (document_id, entity_type, entity_value, context, confidence) VALUES (?, ?, ?, ?, ?)",
+        [@document_id, entity_type, entity_value, context, confidence]
+      )
+    end
+    
     db.close
   rescue => e
     log_step("Failed to save entity: #{e.message}")

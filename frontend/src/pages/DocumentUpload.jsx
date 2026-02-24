@@ -696,68 +696,83 @@ export function DocumentUpload() {
 
             {/* Entity Summary */}
             <div className="p-6 space-y-6">
-              {/* Entity Type Counts */}
-              {entities.entities_by_type && Object.keys(entities.entities_by_type).length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {Object.entries(entities.entities_by_type).map(([type, count]) => (
-                    <div key={type} className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-lg p-3 border border-blue-200 dark:border-blue-800 text-center">
-                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{count}</div>
-                      <div className="text-xs text-blue-700 dark:text-blue-300 capitalize mt-1">
-                        {type.replace(/_/g, ' ')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {/* Entity List */}
               {entities.entities && entities.entities.length > 0 ? (
                 <div className="space-y-4">
-                  {Object.entries(
-                    entities.entities.reduce((acc, entity) => {
-                      if (!acc[entity.entity_type]) acc[entity.entity_type] = []
-                      acc[entity.entity_type].push(entity)
-                      return acc
-                    }, {})
-                  ).map(([type, typeEntities]) => (
-                    <div key={type} className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                      <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 capitalize flex items-center">
-                        <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-                        {type.replace(/_/g, ' ')} ({typeEntities.length})
-                      </h4>
-                      <div className="space-y-2">
-                        {typeEntities.map((entity, idx) => (
-                          <div key={idx} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="font-medium text-gray-900 dark:text-white">
-                                  {entity.entity_value}
-                                </div>
-                                {entity.context && (
-                                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1 italic">
-                                    "{entity.context}"
+                  {/* Define all 10 entity types in order */}
+                  {[
+                    { type: 'PARTY', icon: '👥', label: 'Parties', description: 'People or organizations involved' },
+                    { type: 'ADDRESS', icon: '📍', label: 'Addresses', description: 'Physical locations' },
+                    { type: 'DATE', icon: '📅', label: 'Dates', description: 'Important dates and deadlines' },
+                    { type: 'AMOUNT', icon: '💰', label: 'Amounts', description: 'Monetary values and compensation' },
+                    { type: 'OBLIGATION', icon: '📋', label: 'Obligations', description: 'Legal duties and responsibilities' },
+                    { type: 'CLAUSE', icon: '📄', label: 'Clauses', description: 'Contract terms and provisions' },
+                    { type: 'JURISDICTION', icon: '⚖️', label: 'Jurisdictions', description: 'Governing laws and regulations' },
+                    { type: 'TERM', icon: '⏱️', label: 'Terms', description: 'Duration and time periods' },
+                    { type: 'CONDITION', icon: '✓', label: 'Conditions', description: 'Requirements and prerequisites' },
+                    { type: 'PENALTY', icon: '⚠️', label: 'Penalties', description: 'Damages, fines, and consequences' }
+                  ].map((entityDef, index) => {
+                    // Get entities for this type
+                    const typeEntities = entities.entities.filter(e => e.entity_type === entityDef.type);
+                    
+                    return (
+                      <div key={entityDef.type} className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                        <div className="mb-3">
+                          <h4 className="text-lg font-bold text-gray-900 dark:text-white flex items-center">
+                            <span className="text-2xl mr-3">{entityDef.icon}</span>
+                            <span className="mr-2">{index + 1}.</span>
+                            {entityDef.label}
+                            {typeEntities.length > 0 && (
+                              <span className="ml-2 text-sm font-normal text-gray-600 dark:text-gray-400">
+                                ({typeEntities.length} found)
+                              </span>
+                            )}
+                          </h4>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 ml-11">
+                            {entityDef.description}
+                          </p>
+                        </div>
+                        
+                        {typeEntities.length > 0 ? (
+                          <div className="ml-11 space-y-2">
+                            {typeEntities.map((entity, idx) => (
+                              <div key={idx} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="font-medium text-gray-900 dark:text-white">
+                                      {entity.entity_value}
+                                    </div>
+                                    {entity.context && (
+                                      <div className="text-sm text-gray-600 dark:text-gray-400 mt-1 italic">
+                                        "{entity.context}"
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                              {entity.confidence && (
-                                <div className="ml-3 flex-shrink-0">
-                                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                    entity.confidence >= 0.9 
-                                      ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
-                                      : entity.confidence >= 0.7
-                                      ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
-                                  }`}>
-                                    {(entity.confidence * 100).toFixed(0)}% confidence
-                                  </span>
+                                  {entity.confidence && (
+                                    <div className="ml-3 flex-shrink-0">
+                                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                        entity.confidence >= 0.9 
+                                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
+                                          : entity.confidence >= 0.7
+                                          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
+                                      }`}>
+                                        {(entity.confidence * 100).toFixed(0)}% confidence
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        ) : (
+                          <div className="ml-11 text-sm text-gray-500 dark:text-gray-500 italic">
+                            No {entityDef.label.toLowerCase()} found in this document
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12">
