@@ -198,17 +198,18 @@ class AIAnalysisService
       next if full_name.length < 5
       
       # Skip if contains generic terms
-      next if full_name.match?(/\b(?:Student|Academic|Session|Payment|Transfer|Account|Amount|First|Second|Third)\b/i)
+      next if full_name.match?(/\b(?:Student|Academic|Session|Payment|Transfer|Account|Amount|First|Second|Third|Class|Term|Method|Bank|Number|Nigeria|Naira|Only)\b/i)
       
       parties << { type: 'PARTY', value: full_name, context: 'company party to agreement', confidence: 0.95 }
     end
     
-    # Extract person names (2-3 words, each capitalized, strict validation)
-    text.scan(/\b([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\b/) do |first, last, middle|
+    # Extract person names ONLY from specific contexts
+    # Context 1: After "between" or "and" in agreement clauses
+    text.scan(/\b(?:between|and)\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?(?:\s+and|\s+,|\s+\()/i) do |first, last, middle|
       full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
       
       # Skip if contains generic/common words
-      generic_words = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Date Time Period Year Month Day Week]
+      generic_words = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Date Time Period Year Month Day Week Nigeria Naira Only]
       next if generic_words.any? { |w| full_name.include?(w) }
       
       # Skip if it's a location
@@ -225,8 +226,26 @@ class AIAnalysisService
       parties << { type: 'PARTY', value: full_name, context: 'individual party to agreement', confidence: 0.90 }
     end
     
+    # Context 2: In signature blocks (Name: or Signed:)
+    text.scan(/(?:Name|Signed|Signature|Party):\s*([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?/i) do |first, last, middle|
+      full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
+      
+      # Skip if contains generic/common words
+      generic_words = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Date Time Period Year Month Day Week Nigeria Naira Only]
+      next if generic_words.any? { |w| full_name.include?(w) }
+      
+      # Skip if it's a location
+      locations = %w[Lagos Oyo Niger Imo Abuja New York California Texas Florida]
+      next if locations.any? { |loc| full_name.include?(loc) }
+      
+      # Skip if words are too short
+      next if full_name.split.any? { |w| w.length < 3 }
+      
+      parties << { type: 'PARTY', value: full_name, context: 'individual party to agreement', confidence: 0.90 }
+    end
+    
     # Remove duplicates
-    parties.uniq { |p| p[:value] }
+    parties.uniq { |p| p[:value].downcase }
   end
   
   def filter_valid_parties(entities)
