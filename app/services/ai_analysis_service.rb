@@ -187,65 +187,66 @@ class AIAnalysisService
   end
   
   def extract_parties_strict(text)
-    # STRICT PARTY EXTRACTION - Only real company names and person names
+    # ULTRA-STRICT PARTY EXTRACTION - Only actual names, no surrounding text
     parties = []
     
     # Extract company names (must have company indicator)
+    # This regex captures ONLY the company name, not surrounding text
     text.scan(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,4})\s+(Corporation|Corp\.?|Inc\.?|LLC|Ltd\.?|Limited|Company|Co\.?|Partnership|LLP|PC|PA|PLC|Plc|Bank|Solutions|Technologies|Services|Group|Holdings|Enterprises)\b/i) do |name, indicator|
       full_name = "#{name} #{indicator}".strip
       
       # Skip if too short
       next if full_name.length < 5
       
-      # Skip if contains generic terms
-      next if full_name.match?(/\b(?:Student|Academic|Session|Payment|Transfer|Account|Amount|First|Second|Third|Class|Term|Method|Bank|Number|Nigeria|Naira|Only)\b/i)
+      # Skip if contains ANY generic/common words
+      skip_words = %w[This That These Those Agreement Contract Employee Employer Party Parties Between And Or With From To By For Of The In On At As Is Are Was Were Be Been Being Have Has Had Do Does Did Will Would Should Could May Might Must Can Shall Student Academic Session Payment Transfer Account Amount First Second Third Class Term Method Bank Number Nigeria Naira Only Representative Authorized Signature Signed Name Date Time]
+      next if skip_words.any? { |w| full_name.split.include?(w) }
       
       parties << { type: 'PARTY', value: full_name, context: 'company party to agreement', confidence: 0.95 }
     end
     
-    # Extract person names ONLY from specific contexts
-    # Context 1: After "between" or "and" in agreement clauses
-    text.scan(/\b(?:between|and)\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?(?:\s+and|\s+,|\s+\()/i) do |first, last, middle|
+    # Extract person names ONLY from very specific patterns
+    # Pattern 1: "between [Name] and" or "and [Name] ("
+    text.scan(/\bbetween\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\s+and\b/i) do |first, last, middle|
       full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
-      
-      # Skip if contains generic/common words
-      generic_words = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Date Time Period Year Month Day Week Nigeria Naira Only]
-      next if generic_words.any? { |w| full_name.include?(w) }
-      
-      # Skip if it's a location
-      locations = %w[Lagos Oyo Niger Imo Abuja New York California Texas Florida]
-      next if locations.any? { |loc| full_name.include?(loc) }
-      
-      # Skip if it's a job title
-      job_titles = %w[Administrator Officer Manager Director President Secretary]
-      next if job_titles.any? { |title| full_name.include?(title) }
-      
-      # Skip if words are too short
-      next if full_name.split.any? { |w| w.length < 3 }
-      
-      parties << { type: 'PARTY', value: full_name, context: 'individual party to agreement', confidence: 0.90 }
+      next if should_skip_person_name?(full_name)
+      parties << { type: 'PARTY', value: full_name, context: 'party to agreement', confidence: 0.90 }
     end
     
-    # Context 2: In signature blocks (Name: or Signed:)
-    text.scan(/(?:Name|Signed|Signature|Party):\s*([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?/i) do |first, last, middle|
+    text.scan(/\band\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\s*\(/i) do |first, last, middle|
       full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
-      
-      # Skip if contains generic/common words
-      generic_words = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Date Time Period Year Month Day Week Nigeria Naira Only]
-      next if generic_words.any? { |w| full_name.include?(w) }
-      
-      # Skip if it's a location
-      locations = %w[Lagos Oyo Niger Imo Abuja New York California Texas Florida]
-      next if locations.any? { |loc| full_name.include?(loc) }
-      
-      # Skip if words are too short
-      next if full_name.split.any? { |w| w.length < 3 }
-      
-      parties << { type: 'PARTY', value: full_name, context: 'individual party to agreement', confidence: 0.90 }
+      next if should_skip_person_name?(full_name)
+      parties << { type: 'PARTY', value: full_name, context: 'party to agreement', confidence: 0.90 }
     end
     
-    # Remove duplicates
+    # Pattern 2: Signature blocks - "Name: [Name]" or "Signed: [Name]"
+    text.scan(/(?:Name|Signed|Signature|Employee\s+Name|Party):\s*([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?/i) do |first, last, middle|
+      full_name = middle ? "#{first} #{middle} #{last}" : "#{first} #{last}"
+      next if should_skip_person_name?(full_name)
+      parties << { type: 'PARTY', value: full_name, context: 'signatory', confidence: 0.90 }
+    end
+    
+    # Remove duplicates (case-insensitive)
     parties.uniq { |p| p[:value].downcase }
+  end
+  
+  def should_skip_person_name?(name)
+    # Skip if contains ANY generic/common words
+    skip_words = %w[Student Name Academic Session First Class Term Payment Method Bank Transfer Transaction Account Number Amount Date Time Period Year Month Day Week Nigeria Naira Only This That Agreement Contract Employee Employer Party Parties Representative Authorized Signature Signed]
+    return true if skip_words.any? { |w| name.split.include?(w) }
+    
+    # Skip if it's a location
+    locations = %w[Lagos Oyo Niger Imo Abuja Wuse Victoria Island Ikeja Ibadan Minna New York California Texas Florida Illinois Pennsylvania]
+    return true if locations.any? { |loc| name.include?(loc) }
+    
+    # Skip if it's a job title
+    job_titles = %w[Administrator Officer Manager Director President Secretary Treasurer Chairman]
+    return true if job_titles.any? { |title| name.include?(title) }
+    
+    # Skip if words are too short (less than 3 characters)
+    return true if name.split.any? { |w| w.length < 3 }
+    
+    false
   end
   
   def filter_valid_parties(entities)
