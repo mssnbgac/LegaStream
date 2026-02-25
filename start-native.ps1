@@ -37,8 +37,8 @@ Start-Process powershell -ArgumentList "-Command", "npm run dev" -WindowStyle No
 Write-Host ""
 Write-Host "🎉 LegaStream is starting up!" -ForegroundColor Green
 Write-Host "📊 Frontend: http://localhost:5173" -ForegroundColor Cyan
-Write-Host "🔧 Backend: http://localhost:3000" -ForegroundColor Cyan
-Write-Host "📊 Health Check: http://localhost:3000/up" -ForegroundColor Cyan
+Write-Host "🔧 Backend: http://localhost:6000" -ForegroundColor Cyan
+Write-Host "📊 Health Check: http://localhost:6000/up" -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "✨ Demo Features Available:" -ForegroundColor Yellow

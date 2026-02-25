@@ -227,8 +227,8 @@ class AIProvider
   end
 
   def call_gemini_api(prompt)
-    # Use v1 API with gemini-1.5-flash (correct API version)
-    uri = URI("https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=#{@api_key}")
+    # Use v1beta API with gemini-2.5-flash (latest fast model)
+    uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=#{@api_key}")
     
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
@@ -238,7 +238,7 @@ class AIProvider
       }],
       generationConfig: {
         temperature: 0.1,  # Lower temperature for more consistent JSON
-        maxOutputTokens: 2048,
+        maxOutputTokens: 4096,  # Increased to handle all 10 entity types
         topP: 0.8,
         topK: 10
       }

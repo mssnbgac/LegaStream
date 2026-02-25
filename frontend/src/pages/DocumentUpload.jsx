@@ -503,13 +503,24 @@ export function DocumentUpload() {
             </div>
             
             <div className="p-6 space-y-8">
-              {/* Top Metrics */}
+              {/* Top Metrics - Enhanced with Entity Breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/50 dark:to-blue-800/50 rounded-xl p-5 border border-blue-200 dark:border-blue-700">
                   <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
                     {selectedDocument.analysis_results?.entities_extracted || 0}
                   </div>
                   <div className="text-sm text-blue-700 dark:text-blue-300 mt-1">Entities Extracted</div>
+                  {selectedDocument.analysis_results?.entity_breakdown && (
+                    <div className="text-xs text-blue-600 dark:text-blue-400 mt-2 space-y-0.5">
+                      {Object.entries(selectedDocument.analysis_results.entity_breakdown).map(([type, count]) => (
+                        count > 0 && (
+                          <div key={type}>
+                            {count} {type.toLowerCase()}
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/50 dark:to-green-800/50 rounded-xl p-5 border border-green-200 dark:border-green-700">
                   <div className="text-3xl font-bold text-green-600 dark:text-green-400">

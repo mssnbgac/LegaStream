@@ -133,31 +133,18 @@ class AIAnalysisService
   end
 
   def extract_entities_with_ai(text)
-    log_step("Using HYBRID extraction: Regex for PARTY, AI for other entities")
+    log_step("Using Gemini AI for ALL entity extraction")
     
-    # HYBRID APPROACH: Use regex for PARTY (more accurate), AI for everything else
-    all_entities = []
-    
-    # Step 1: Extract PARTY entities using strict regex (NO DATABASE SAVING YET)
-    log_step("Extracting PARTY entities using strict regex patterns...")
-    party_entities = extract_parties_strict_no_save(text)
-    log_step("Found #{party_entities.length} PARTY entities via regex")
-    all_entities.concat(party_entities)
-    
-    # Step 2: Get other entities from AI (excluding PARTY)
-    log_step("Using #{@ai_provider.provider_name.upcase} for non-PARTY entities")
+    # Use AI for ALL entities (including PARTY)
+    log_step("Using #{@ai_provider.provider_name.upcase} for entity extraction")
     ai_entities = @ai_provider.extract_entities(text)
     
     if ai_entities.is_a?(Array) && !ai_entities.empty?
-      # Filter out PARTY entities from AI results, keep everything else
-      non_party_entities = ai_entities.reject { |e| e['type'] == 'PARTY' || e[:type] == 'PARTY' }
-      log_step("AI extracted #{non_party_entities.length} non-PARTY entities")
-      all_entities.concat(non_party_entities)
+      log_step("AI extracted #{ai_entities.length} entities")
+      all_entities = ai_entities
     else
-      log_step("AI returned no entities, using fallback for non-PARTY types")
-      fallback_entities = extract_entities_fallback_no_save(text)
-      non_party_fallback = fallback_entities.reject { |e| e[:type] == 'PARTY' }
-      all_entities.concat(non_party_fallback)
+      log_step("AI returned no entities, using fallback")
+      all_entities = extract_entities_fallback_no_save(text)
     end
     
     # Remove duplicates based on NORMALIZED type and value (trim, lowercase, remove punctuation)
@@ -169,7 +156,7 @@ class AIAnalysisService
     
     log_step("Total entities after deduplication: #{unique_entities.length} (removed #{all_entities.length - unique_entities.length} duplicates)")
     
-    # NOW save all unique entities to database (ONLY ONCE)
+    # Save all unique entities to database (ONLY ONCE)
     unique_entities.each do |entity|
       type = entity['type'] || entity[:type]
       value = entity['value'] || entity[:value]
@@ -182,7 +169,7 @@ class AIAnalysisService
     
     unique_entities
   rescue => e
-    log_step("Hybrid extraction failed: #{e.message}")
+    log_step("AI extraction failed: #{e.message}")
     log_step("Error class: #{e.class}")
     extract_entities_fallback_no_save(text)
   end
@@ -213,9 +200,9 @@ class AIAnalysisService
       # Skip if too short
       next if full_name.length < 5
       
-      # Skip if contains ANY generic/common words
+      # Skip if contains ANY generic/common words (case-insensitive)
       skip_words = %w[This That These Those Agreement Contract Employee Employer Party Parties Between And Or With From To By For Of The In On At As Is Are Was Were Be Been Being Have Has Had Do Does Did Will Would Should Could May Might Must Can Shall Student Academic Session Payment Transfer Account Amount First Second Third Class Term Method Bank Number Nigeria Naira Only Representative Authorized Signature Signed Name Date Time Provide Consulting Professional Business Services Transactions]
-      next if skip_words.any? { |w| full_name.split.include?(w) }
+      next if skip_words.any? { |w| full_name.split.map(&:downcase).include?(w.downcase) }
       
       parties << { type: 'PARTY', value: full_name, context: 'company party to agreement', confidence: 0.95 }
     end
@@ -635,6 +622,7 @@ class AIAnalysisService
   
   def save_entity_if_not_exists(entity_type, entity_value, context, confidence = 0.85)
     db = SQLite3::Database.new('storage/legastream.db')
+    db.results_as_hash = true  # FIX: Ensure query results are returned as hashes, not arrays
     
     # Normalize value for comparison (trim, lowercase, remove punctuation and spaces)
     normalized_value = entity_value.to_s.strip.downcase.gsub(/[[:punct:]\s]/, '')
@@ -655,20 +643,48 @@ class AIAnalysisService
     if already_exists
       log_step("Skipping duplicate entity: #{entity_type} - #{entity_value}")
     else
+      log_step("Saving entity: #{entity_type} - #{entity_value}")
       db.execute(
         "INSERT INTO entities (document_id, entity_type, entity_value, context, confidence) VALUES (?, ?, ?, ?, ?)",
         [@document_id, entity_type, entity_value, context, confidence]
       )
+      log_step("✓ Entity saved successfully")
     end
     
     db.close
   rescue => e
-    log_step("Failed to save entity: #{e.message}")
+    log_step("❌ Failed to save entity: #{e.class} - #{e.message}")
+    log_step("Entity details: type=#{entity_type}, value=#{entity_value}")
+    puts "Full error: #{e.backtrace.first(3).join("\n")}"
   end
 
   def save_results(entities, compliance, risks, summary, extracted_text)
+    # Calculate entity breakdown by type
+    entity_breakdown = entities.group_by { |e| e['type'] || e[:type] }.transform_values(&:count)
+    
+    # Map entity types to friendly names
+    type_names = {
+      'PARTY' => 'parties',
+      'ADDRESS' => 'addresses',
+      'DATE' => 'dates',
+      'AMOUNT' => 'amounts',
+      'OBLIGATION' => 'obligations',
+      'CLAUSE' => 'clauses',
+      'JURISDICTION' => 'jurisdictions',
+      'TERM' => 'terms',
+      'CONDITION' => 'conditions',
+      'PENALTY' => 'penalties'
+    }
+    
+    friendly_breakdown = {}
+    entity_breakdown.each do |type, count|
+      friendly_name = type_names[type] || type.downcase
+      friendly_breakdown[friendly_name] = count
+    end
+    
     analysis_results = {
       entities_extracted: entities.length,
+      entity_breakdown: friendly_breakdown,
       compliance_score: compliance[:score],
       risk_level: risks[:level],
       issues_flagged: compliance[:issues].length,

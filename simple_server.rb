@@ -5,9 +5,17 @@ require 'fileutils'
 require 'base64'
 require 'digest'
 
+# Load environment variables from .env file
+begin
+  require 'dotenv/load'
+rescue LoadError
+  # dotenv not available, will use system environment variables
+  puts "Warning: dotenv gem not found, using system environment variables"
+end
+
 # Enhanced LegaStream Backend Server with Document Processing
 class LegaStreamServer
-  def initialize(port = 3000)
+  def initialize(port = 6000)
     @port = port
     @server = WEBrick::HTTPServer.new(
       Port: @port,
@@ -97,6 +105,9 @@ class LegaStreamServer
     when %r{^/api/v1/documents/(\d+)/status$}
       puts "DEBUG: Matched document status route"
       handle_document_status(req, res, $1)
+    when %r{^/api/v1/documents/(\d+)/entities$}
+      puts "DEBUG: Matched document entities route"
+      handle_document_entities(req, res, $1)
     when '/api/v1/stats'
       puts "DEBUG: Matched stats route"
       handle_stats(req, res)
@@ -287,19 +298,43 @@ class LegaStreamServer
 
   def handle_document_detail(req, res, method, doc_id)
     res['Content-Type'] = 'application/json'
-    document = @documents.find { |d| d[:id] == doc_id.to_i }
     
-    if document
-      case method
-      when 'GET'
+    case method
+    when 'GET'
+      document = @documents.find { |d| d[:id] == doc_id.to_i }
+      if document
         res.body = format_document(document).to_json
-      when 'DELETE'
-        @documents.reject! { |d| d[:id] == doc_id.to_i }
-        res.body = { message: 'Document deleted successfully' }.to_json
+      else
+        res.status = 404
+        res.body = { error: 'Document not found' }.to_json
       end
+      
+    when 'DELETE'
+      begin
+        # Delete from database
+        db = SQLite3::Database.new('storage/legastream.db')
+        
+        # First, delete associated entities
+        db.execute('DELETE FROM entities WHERE document_id = ?', [doc_id.to_i])
+        
+        # Then delete the document
+        result = db.execute('DELETE FROM documents WHERE id = ?', [doc_id.to_i])
+        
+        db.close
+        
+        # Also remove from in-memory array
+        @documents.reject! { |d| d[:id] == doc_id.to_i }
+        
+        res.body = { message: 'Document deleted successfully' }.to_json
+      rescue => e
+        puts "Error deleting document: #{e.message}"
+        res.status = 500
+        res.body = { error: 'Failed to delete document', details: e.message }.to_json
+      end
+      
     else
-      res.status = 404
-      res.body = { error: 'Document not found' }.to_json
+      res.status = 405
+      res.body = { error: 'Method not allowed' }.to_json
     end
   end
 
@@ -337,6 +372,48 @@ class LegaStreamServer
     else
       res.status = 404
       res.body = { error: 'Document not found' }.to_json
+    end
+  end
+
+  def handle_document_entities(req, res, doc_id)
+    res['Content-Type'] = 'application/json'
+    
+    begin
+      # Connect to database
+      db = SQLite3::Database.new('storage/legastream.db')
+      db.results_as_hash = true
+      
+      # Get document to verify it exists and belongs to user
+      document = db.execute('SELECT * FROM documents WHERE id = ?', [doc_id.to_i]).first
+      
+      unless document
+        res.status = 404
+        res.body = { error: 'Document not found' }.to_json
+        db.close
+        return
+      end
+      
+      # Get all entities for this document
+      entities = db.execute('SELECT * FROM entities WHERE document_id = ? ORDER BY id', [doc_id.to_i])
+      
+      db.close
+      
+      # Return entities
+      res.body = {
+        document_id: doc_id.to_i,
+        total_entities: entities.length,
+        entities: entities.map { |e| {
+          id: e['id'],
+          entity_type: e['entity_type'],
+          entity_value: e['entity_value'],
+          context: e['context'],
+          confidence: e['confidence']
+        }}
+      }.to_json
+    rescue => e
+      puts "Error fetching entities: #{e.message}"
+      res.status = 500
+      res.body = { error: 'Failed to fetch entities', details: e.message }.to_json
     end
   end
 
@@ -560,6 +637,6 @@ end
 
 # Start the enhanced server
 if __FILE__ == $0
-  server = LegaStreamServer.new(3000)
+  server = LegaStreamServer.new(6000)
   server.start
 end
