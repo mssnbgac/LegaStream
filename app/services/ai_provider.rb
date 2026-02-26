@@ -124,43 +124,85 @@ class AIProvider
       text_sample = text[0..4000]
 
       prompt = <<~PROMPT
-        You are a legal document analyzer. Extract ONLY the actual contracting parties from this document.
+        You are a legal document analyzer. Extract entities with MAXIMUM PRECISION and CLEANLINESS.
 
-        STRICT RULES FOR PARTY EXTRACTION:
-        1. ONLY extract names of people or organizations who are SIGNING the agreement
-        2. Look for parties in:
-           - "This Agreement is between [PARTY A] and [PARTY B]"
-           - Signature blocks at the end
-           - "The parties to this agreement are..."
-        3. Extract ONLY clean names:
-           - Companies: "Acme Corporation", "Tech Solutions LLC", "BrightPath Limited"
-           - People: "John Smith", "Mary Johnson", "Abdul Mai"
-        4. DO NOT extract:
-           - Generic terms: "Student Name", "Academic Session", "First Term"
-           - Financial terms: "Payment Method", "Account Number", "Transfer"
-           - Descriptive phrases: "First Class Term", "Payment Bank Method"
-           - Currencies: "Naira", "Dollar"
-           - Sentence fragments or partial phrases
-           - Anything that is not a proper name
+        CRITICAL RULES FOR ALL ENTITIES:
+        1. Extract ONLY complete, standalone values - NO sentence fragments
+        2. Extract ONLY the core entity - NO surrounding text
+        3. Each entity must be independently meaningful
+        4. NO partial phrases, NO incomplete sentences
 
-        For OTHER entity types, extract normally:
-        - ADDRESS: Physical addresses only
-        - DATE: Dates in any format
-        - AMOUNT: Money amounts with currency symbols
-        - OBLIGATION: Legal duties (shall, must, will)
-        - CLAUSE: Contract terms and conditions
-        - JURISDICTION: Governing law references
-        - TERM: Duration/time periods
-        - CONDITION: Requirements and conditions
-        - PENALTY: Damages and penalties
+        ENTITY TYPES AND EXTRACTION RULES:
+
+        **PARTY** (People or organizations signing the agreement):
+        - Extract ONLY actual names: "Acme Corporation", "John Smith"
+        - Look in: "between [NAME] and [NAME]", signature blocks
+        - DO NOT extract: "is made between", "and in accordance with", sentence fragments
+        - Must be a complete proper name
+
+        **ADDRESS** (Physical locations):
+        - Extract complete addresses: "123 Main Street, New York"
+        - DO NOT extract: partial addresses, city names alone
+
+        **DATE** (Important dates):
+        - Extract specific dates: "March 1, 2026", "January 15, 2025"
+        - DO NOT extract: "on" or "as of" prefixes
+
+        **AMOUNT** (Monetary values):
+        - Extract clean amounts: "$75,000", "$5,000"
+        - Include context: "annual salary", "penalty", "liquidated damages"
+        - DO NOT extract: surrounding text like "subject to" or "payable in"
+
+        **OBLIGATION** (Legal duties):
+        - Extract COMPLETE obligation sentences
+        - Must start with subject: "Employee shall...", "Employer shall..."
+        - Must be a full, meaningful obligation
+        - DO NOT extract: fragments like "subject to lawful deductions"
+
+        **CLAUSE** (Contract terms):
+        - Extract COMPLETE clause sentences
+        - Must be independently understandable
+        - Example: "Either party may terminate this Agreement by providing thirty (30) days written notice."
+
+        **JURISDICTION** (Governing law):
+        - Extract clean jurisdiction: "State of New York", "laws of California"
+        - DO NOT extract: "subject to", "governed by" prefixes
+
+        **TERM** (Duration/time periods):
+        - Extract specific durations: "twenty-four (24) months", "thirty (30) days"
+        - Include context: "contract duration", "notice period"
+
+        **CONDITION** (Requirements):
+        - Extract complete conditions: "successful completion of a background check"
+        - Must be a complete requirement phrase
+
+        **PENALTY** (Damages/fines):
+        - Extract COMPLETE penalty clauses
+        - Must include what triggers it and the consequence
 
         Document:
         #{text_sample}
 
-        Return ONLY a valid JSON array. Each entity must have: type, value, context, confidence.
-        Example: [{"type":"PARTY","value":"Acme Corporation","context":"employer","confidence":0.95}]
+        Return ONLY a valid JSON array. Each entity MUST have: type, value, context, confidence.
+        
+        QUALITY CHECKLIST FOR EACH ENTITY:
+        ✓ Is the value complete and standalone?
+        ✓ Does it make sense without surrounding text?
+        ✓ Is it free of sentence fragments?
+        ✓ Is the context descriptive and clear?
 
-        If no clear parties are found, return an empty array for PARTY type.
+        Example of PERFECT extraction:
+        [
+          {"type":"PARTY","value":"Acme Corporation","context":"Employer","confidence":0.95},
+          {"type":"PARTY","value":"John Smith","context":"Employee","confidence":0.95},
+          {"type":"AMOUNT","value":"$75,000","context":"annual salary","confidence":0.95}
+        ]
+
+        Example of BAD extraction (DO NOT DO THIS):
+        [
+          {"type":"PARTY","value":"is made between Acme Corporation","context":"party","confidence":0.95},
+          {"type":"AMOUNT","value":"$75,000, subject to lawful deductions","context":"amount","confidence":0.95}
+        ]
       PROMPT
 
       response = call_gemini_api(prompt)
