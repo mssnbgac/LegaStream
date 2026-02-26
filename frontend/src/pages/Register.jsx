@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Scale, Mail, User, Lock, Eye, EyeOff, CheckCircle } from 'lucide-react'
+import { Scale, Mail, User, Lock, Eye, EyeOff } from 'lucide-react'
 
 export function Register() {
   const [formData, setFormData] = useState({
@@ -14,7 +14,6 @@ export function Register() {
   const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState([])
-  const [success, setSuccess] = useState(false)
   const navigate = useNavigate()
 
   const handleChange = (e) => {
@@ -73,15 +72,13 @@ export function Register() {
       const data = await response.json()
 
       if (response.ok) {
-        setSuccess(true)
-        // Redirect to login after 3 seconds
-        setTimeout(() => {
-          navigate('/login', { 
-            state: { 
-              message: 'Registration successful! Please check your email to confirm your account before logging in.' 
-            }
-          })
-        }, 3000)
+        // Redirect directly to login without email confirmation popup
+        navigate('/login', { 
+          state: { 
+            message: 'Registration successful! You can now log in with your credentials.',
+            email: formData.email
+          }
+        })
       } else {
         setErrors(data.errors || ['Registration failed. Please try again.'])
       }
@@ -93,55 +90,7 @@ export function Register() {
     }
   }
 
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full space-y-8">
-          <div className="text-center">
-            <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 shadow-lg mb-6">
-              <CheckCircle className="h-10 w-10 text-white" />
-            </div>
-            <h2 className="text-4xl font-extrabold text-white mb-3">
-              Registration Successful!
-            </h2>
-            <p className="text-lg text-gray-400 mb-6">
-              We've sent a confirmation email to <strong>{formData.email}</strong>
-            </p>
-            <div className="bg-green-900/50 border border-green-800 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-green-300 mb-2">What's Next?</h3>
-              <div className="text-left text-green-400 space-y-2">
-                <p>✓ Check your email inbox</p>
-                <p>✓ Click the confirmation link</p>
-                <p>✓ Return to login and sign in</p>
-              </div>
-            </div>
-            <p className="text-sm text-gray-500 mt-4">
-              Redirecting to login page...
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        {/* Logo and Header */}
-        <div className="text-center">
-          <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg mb-6">
-            <Scale className="h-10 w-10 text-white" />
-          </div>
-          <h2 className="text-4xl font-extrabold text-white mb-3">
-            Join Legal Auditor Agent
-          </h2>
-          <p className="text-lg text-gray-400">
-            Create your account and start analyzing legal documents with AI
-          </p>
-        </div>
-
-        {/* Error Messages */}
-        {errors.length > 0 && (
+  if (errors.length > 0) {
           <div className="bg-red-900/50 border border-red-800 rounded-xl p-4">
             <div className="text-red-300">
               {errors.map((error, index) => (

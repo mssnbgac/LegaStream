@@ -32,6 +32,19 @@ export function DocumentUpload() {
     fetchDocuments()
   }, [])
 
+  // Auto-refresh documents every 3 seconds if any are processing
+  useEffect(() => {
+    const hasProcessing = documents.some(doc => doc.status === 'processing' || doc.status === 'uploaded')
+    
+    if (hasProcessing) {
+      const interval = setInterval(() => {
+        fetchDocuments()
+      }, 3000) // Poll every 3 seconds
+      
+      return () => clearInterval(interval)
+    }
+  }, [documents])
+
   const fetchDocuments = async () => {
     try {
       setRefreshing(true)
