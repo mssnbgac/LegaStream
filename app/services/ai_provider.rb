@@ -234,43 +234,44 @@ class AIProvider
     parties = entities.select { |e| (e['type'] || e[:type]) == 'PARTY' }.map { |e| e['value'] || e[:value] }.first(3)
     dates = entities.select { |e| (e['type'] || e[:type]) == 'DATE' }.map { |e| e['value'] || e[:value] }.first(2)
     amounts = entities.select { |e| (e['type'] || e[:type]) == 'AMOUNT' }.map { |e| e['value'] || e[:value] }.first(2)
+    terms = entities.select { |e| (e['type'] || e[:type]) == 'TERM' }.map { |e| e['value'] || e[:value] }.first(2)
+    obligations = entities.select { |e| (e['type'] || e[:type]) == 'OBLIGATION' }.map { |e| e['value'] || e[:value] }.first(2)
     
     prompt = <<~PROMPT
-      Create a concise executive summary of this legal document in EXACTLY 3-4 sentences (maximum 250 words).
+      Create a comprehensive executive summary of this legal document in 4-5 detailed sentences.
 
-      Structure your summary as follows:
-      1. First sentence: Document type and date
-      2. Second sentence: Main parties involved
-      3. Third sentence: Key terms, amounts, or obligations
-      4. Fourth sentence (optional): Important conditions or deadlines
+      Structure your summary to include ALL of the following:
+      1. Document type and effective date
+      2. Complete identification of all parties (with their roles - employer/employee, buyer/seller, etc.)
+      3. Key financial terms including amounts, salary, payment terms, or monetary values
+      4. Main obligations, terms, or conditions (duration, termination clauses, etc.)
+      5. Important contingencies, penalties, or special conditions
 
       Key entities found:
       - Parties: #{parties.join(', ')}
       - Dates: #{dates.join(', ')}
       - Amounts: #{amounts.join(', ')}
+      - Terms: #{terms.join(', ')}
+      - Obligations: #{obligations.join(', ')}
 
       Document excerpt:
-      #{text[0..2000]}
+      #{text[0..3000]}
 
-      Write a clear, professional summary that a business executive can read in 30 seconds.
-      Focus on WHO, WHAT, WHEN, and HOW MUCH.
-      Do NOT include legal jargon or unnecessary details.
+      Write a clear, professional, and COMPLETE summary that covers all essential information.
+      Focus on WHO, WHAT, WHEN, HOW MUCH, and KEY CONDITIONS.
+      Include specific details like exact amounts, dates, and party names.
+      Make it comprehensive enough that a business executive understands the full scope of the agreement.
     PROMPT
 
     summary = call_gemini_api(prompt)
     
-    # Ensure summary is not too long (max 250 words)
-    if summary && summary.split.length > 250
-      words = summary.split[0..249]
-      summary = words.join(' ') + '...'
-    end
-    
+    # Return full summary without truncation
     summary
   end
 
   def call_gemini_api(prompt)
-    # Use v1beta API with gemini-2.5-flash (latest fast model)
-    uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=#{@api_key}")
+    # Use v1beta API with gemini-flash-lite-latest (lighter model with higher quota)
+    uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=#{@api_key}")
     
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'

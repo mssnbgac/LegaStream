@@ -5,9 +5,11 @@ class Api::V1::AuthController < ApplicationController
     @user = User.new(user_params)
     
     if @user.save
-      UserMailer.confirmation_email(@user).deliver_now
+      # Auto-confirm email - no email confirmation required
+      @user.confirm_email!
+      
       render json: {
-        message: 'Registration successful! Please check your email to confirm your account.',
+        message: 'Registration successful! You can now log in.',
         user: user_response(@user)
       }, status: :created
     else
@@ -19,7 +21,7 @@ class Api::V1::AuthController < ApplicationController
     @user = User.find_by(email: params[:email].downcase)
     
     if @user&.authenticate(params[:password])
-      if @user.can_login?
+      if @user.active? && !@user.locked?
         @user.update_last_login!
         token = generate_jwt_token(@user)
         
@@ -28,11 +30,6 @@ class Api::V1::AuthController < ApplicationController
           user: user_response(@user),
           message: 'Login successful'
         }
-      elsif !@user.confirmed?
-        render json: { 
-          error: 'Please confirm your email address before logging in.',
-          resend_confirmation: true 
-        }, status: :unauthorized
       elsif @user.locked?
         render json: { error: 'Your account has been locked. Please contact support.' }, status: :unauthorized
       else

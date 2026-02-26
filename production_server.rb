@@ -10,6 +10,7 @@ require 'fileutils'
 require 'time'
 require 'dotenv/load'
 require_relative 'app/services/ai_analysis_service'
+require_relative 'app/services/enterprise_ai_service'
 
 # Force immediate output (no buffering)
 $stdout.sync = true
@@ -348,8 +349,8 @@ class ProductionServer
       password_hash = hash_password(password)
       confirmation_token = SecureRandom.urlsafe_base64(32)
       
-      # In development mode, auto-confirm emails
-      email_confirmed = @development_mode ? 1 : 0
+      # Auto-confirm all users - no email confirmation needed
+      email_confirmed = 1
       
       @db.execute(
         "INSERT INTO users (email, password_hash, first_name, last_name, confirmation_token, email_confirmed) VALUES (?, ?, ?, ?, ?, ?)",
@@ -358,22 +359,11 @@ class ProductionServer
       
       user_id = @db.last_insert_row_id
       
-      # Send confirmation email (unless in dev mode)
-      unless @development_mode
-        send_confirmation_email(email, first_name, confirmation_token)
-      end
-      
-      puts "Created user: #{email} (#{@development_mode ? 'auto-confirmed' : 'confirmation email sent'})"
-      
-      message = if @development_mode
-        'Registration successful! Your account is ready to use.'
-      else
-        'Registration successful! Please check your email to confirm your account.'
-      end
+      puts "Created user: #{email} (auto-confirmed, no email required)"
       
       res.status = 201
       res.body = {
-        message: message,
+        message: 'Registration successful! You can now log in.',
         user: {
           id: user_id,
           email: email,
@@ -409,36 +399,26 @@ class ProductionServer
       user = @db.execute("SELECT * FROM users WHERE email = ?", [email]).first
       
       if user && verify_password(password, user['password_hash'])
-        # In development mode, skip email confirmation check
-        if @development_mode || user['email_confirmed'] == 1
-          puts "Login successful for: #{email}"
-          
-          # Update last login
-          @db.execute("UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", [user['id']])
-          
-          token = generate_jwt_token(user)
-          
-          res.body = {
-            token: token,
-            user: {
-              id: user['id'],
-              email: user['email'],
-              first_name: user['first_name'],
-              last_name: user['last_name'],
-              full_name: "#{user['first_name']} #{user['last_name']}",
-              role: user['role'],
-              email_confirmed: user['email_confirmed'] == 1 || @development_mode
-            },
-            message: 'Login successful'
-          }.to_json
-        else
-          puts "Email not confirmed for: #{email}"
-          res.status = 401
-          res.body = { 
-            error: 'Please confirm your email address before logging in.',
-            resend_confirmation: true 
-          }.to_json
-        end
+        puts "Login successful for: #{email}"
+        
+        # Update last login
+        @db.execute("UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", [user['id']])
+        
+        token = generate_jwt_token(user)
+        
+        res.body = {
+          token: token,
+          user: {
+            id: user['id'],
+            email: user['email'],
+            first_name: user['first_name'],
+            last_name: user['last_name'],
+            full_name: "#{user['first_name']} #{user['last_name']}",
+            role: user['role'],
+            email_confirmed: true
+          },
+          message: 'Login successful'
+        }.to_json
       else
         puts "Login failed for: #{email}"
         res.status = 401
@@ -850,8 +830,8 @@ class ProductionServer
             puts "🔬 Starting automatic AI analysis for new document #{doc_id}"
             sleep(2) # Small delay to let upload complete
             
-            puts "🤖 Initializing AIAnalysisService for document #{doc_id}"
-            analyzer = AIAnalysisService.new(doc_id)
+            puts "🤖 Initializing EnterpriseAIService for document #{doc_id}"
+            analyzer = EnterpriseAIService.new(doc_id)
             
             puts "⚡ Running analysis..."
             result = analyzer.analyze
@@ -1151,6 +1131,16 @@ class ProductionServer
 
   def format_document(document)
     analysis_results = document['analysis_results'] ? JSON.parse(document['analysis_results']) : nil
+    
+    # Add ai_summary to analysis_results for frontend compatibility
+    if analysis_results && document['ai_summary']
+      analysis_results['summary'] = document['ai_summary']
+    end
+    
+    # Add confidence_score alias for frontend compatibility
+    if analysis_results && analysis_results['ai_confidence']
+      analysis_results['confidence_score'] = analysis_results['ai_confidence']
+    end
     
     # Convert timestamps to local time with timezone info
     created_at = document['created_at'] ? Time.parse(document['created_at']).localtime.iso8601 : nil

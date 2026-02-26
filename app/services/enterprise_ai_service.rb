@@ -7,6 +7,7 @@ require 'json'
 require 'uri'
 require 'time'
 require 'pdf-reader'
+require 'sqlite3'
 require_relative 'ai_provider'
 
 class EnterpriseAIService
@@ -45,6 +46,10 @@ class EnterpriseAIService
     entities = extract_legal_entities(text)
     audit_log('entities_extracted', { count: entities.length })
     
+    # Remove duplicate entities (same type and value)
+    entities = deduplicate_entities(entities)
+    audit_log('entities_deduplicated', { count: entities.length })
+    
     # Multi-model validation if enabled
     if @use_multi_model
       entities = validate_with_multiple_models(text, entities)
@@ -55,16 +60,24 @@ class EnterpriseAIService
     analysis = perform_legal_analysis(text, entities)
     audit_log('legal_analysis_complete', analysis.slice(:compliance_score, :risk_level))
     
+    # Generate AI summary
+    summary = generate_ai_summary(text, entities, analysis)
+    audit_log('summary_generated', { length: summary&.length || 0 })
+    
+    # Calculate confidence
+    confidence = calculate_enterprise_confidence(entities, analysis)
+    
     # Save with audit trail
-    save_enterprise_results(entities, analysis, text)
+    save_enterprise_results(entities, analysis, text, summary, confidence)
     
     {
       success: true,
       entities: entities,
       analysis: analysis,
+      summary: summary,
       audit_trail: @audit_trail,
       requires_verification: @require_verification,
-      confidence_level: calculate_enterprise_confidence(entities, analysis)
+      confidence_level: confidence
     }
   rescue => e
     audit_log('analysis_error', { error: e.message })
@@ -72,6 +85,33 @@ class EnterpriseAIService
   end
 
   private
+
+  def deduplicate_entities(entities)
+    # Remove exact duplicates (same type and value)
+    seen = {}
+    entities.select do |entity|
+      key = "#{entity[:entity_type]}:#{entity[:entity_value]}"
+      if seen[key]
+        false # Skip duplicate
+      else
+        seen[key] = true
+        true # Keep first occurrence
+      end
+    end
+  end
+
+  def generate_ai_summary(text, entities, analysis)
+    # Use AIProvider to generate summary
+    summary = @ai_provider.generate_summary(text, entities, analysis[:compliance_score], analysis[:risk_level])
+    
+    # Return summary or fallback
+    if summary && !summary.empty?
+      summary
+    else
+      # Fallback summary
+      "This #{analysis[:document_type]} involves #{analysis[:parties].join(' and ')}. Analysis completed with #{entities.length} entities extracted."
+    end
+  end
 
   def extract_legal_entities(text)
     puts "Extracting legal entities from text (#{text.length} chars)..."
@@ -99,31 +139,73 @@ class EnterpriseAIService
   end
 
   def build_legal_extraction_prompt(text)
-    # Limit text to 5000 characters for faster processing
-    text_sample = text[0..5000]
+    # Use more text for better context
+    text_sample = text[0..8000]
     
     <<~PROMPT
-      Extract legal entities. Return ONLY JSON array, no markdown.
+      You are a legal document analysis AI. Extract ALL entities from this document with PERFECT ACCURACY.
+
+      CRITICAL EXTRACTION RULES - FOLLOW EXACTLY:
+      1. Extract COMPLETE, STANDALONE values - NO sentence fragments
+      2. Each value must be meaningful on its own
+      3. NO partial phrases or incomplete sentences
+      4. For PARTY: Extract ONLY the complete name (e.g., "Acme Corporation", "John Smith")
+      5. For AMOUNT: Extract number with $ and clear context (e.g., "$75,000" with context "annual salary")
+      6. For OBLIGATION: Extract the COMPLETE obligation statement
+      7. For TERM: Extract ALL time periods - contract duration, notice periods, deadlines (e.g., "twenty-four (24) months", "thirty (30) days")
+      8. For CLAUSE: Extract the complete clause description
+      9. For JURISDICTION: Extract clean jurisdiction name (e.g., "State of New York")
+      10. For CONDITION: Extract complete conditional statement
+      11. For PENALTY: Extract complete penalty description with amount
+
+      ENTITY TYPES TO EXTRACT:
+      - PARTY: Complete legal party names (companies, individuals) - NO fragments like "is made between"
+      - ADDRESS: Complete physical addresses
+      - DATE: Full dates (e.g., "March 1, 2026")
+      - AMOUNT: Monetary values with $ symbol
+      - OBLIGATION: Complete legal obligations or duties
+      - CLAUSE: Important contract clauses or provisions
+      - JURISDICTION: Governing law or jurisdiction
+      - TERM: ALL time periods - contract duration, notice periods, payment terms, deadlines (extract EACH separately)
+      - CONDITION: Conditions or requirements
+      - PENALTY: Penalties or liquidated damages
+
+      EXAMPLES OF GOOD vs BAD EXTRACTION:
       
-      Types: PARTY, ADDRESS, DATE, AMOUNT, OBLIGATION, CLAUSE, JURISDICTION, TERM, CONDITION, PENALTY
+      ✅ GOOD:
+      {"type":"PARTY","value":"Acme Corporation","context":"Employer","confidence":0.95}
+      {"type":"AMOUNT","value":"$75,000","context":"annual salary","confidence":0.95}
+      {"type":"TERM","value":"twenty-four (24) months","context":"contract duration","confidence":0.95}
+      {"type":"TERM","value":"thirty (30) days","context":"notice period","confidence":0.95}
       
-      Rules:
-      - PARTY: Company/person names (Acme Corp, John Smith)
-      - ADDRESS: Full addresses only (123 Main St, New York)
-      - DATE: Dates (March 1, 2026)
-      - AMOUNT: Money with $ (e.g., $75,000)
-      - OBLIGATION: Duties starting with "shall" or "must"
-      - CLAUSE: Contract provisions (e.g., termination clause)
-      - JURISDICTION: Governing law mentions
-      - TERM: Duration (24 months, 2 years)
-      - CONDITION: Requirements with "subject to"
-      - PENALTY: Damages with $ amount
-      
-      Text:
+      ❌ BAD (DO NOT DO THIS):
+      {"type":"PARTY","value":"is made between Acme Corporation","context":"","confidence":0.95}
+      {"type":"AMOUNT","value":"$75,000,","context":"monetary amount","confidence":0.95}
+      {"type":"JURISDICTION","value":"subject to lawful deductions","context":"governing law","confidence":0.95}
+
+      SPECIAL ATTENTION FOR TERMS:
+      - Extract EVERY time period mentioned in the document as a separate TERM entity
+      - Contract duration: "twenty-four (24) months"
+      - Notice period: "thirty (30) days"
+      - Payment terms: "within fifteen (15) days"
+      - Probation period: "ninety (90) days"
+      - Each time period should be its own TERM entity!
+
+      QUALITY CHECKLIST:
+      - [ ] All PARTY values are complete names only
+      - [ ] No sentence fragments in any entity
+      - [ ] All AMOUNT values have $ and clear context
+      - [ ] All TERM values are complete time periods
+      - [ ] All JURISDICTION values are clean location names
+      - [ ] Each entity can stand alone and be understood
+
+      Document text:
       #{text_sample}
-      
-      JSON format:
-      {"entities":[{"type":"PARTY","value":"Acme Corp","context":"","confidence":0.98}]}
+
+      Return ONLY a JSON object with this EXACT format (no markdown, no code blocks):
+      {"entities":[{"type":"PARTY","value":"Acme Corporation","context":"Employer","confidence":0.95}]}
+
+      IMPORTANT: Return ONLY the JSON object, nothing else.
     PROMPT
   end
 
@@ -320,7 +402,7 @@ class EnterpriseAIService
     }
   end
 
-  def save_enterprise_results(entities, analysis, text)
+  def save_enterprise_results(entities, analysis, text, summary, confidence)
     db = SQLite3::Database.new('storage/legastream.db')
     
     # Save entities
@@ -331,7 +413,10 @@ class EnterpriseAIService
       )
     end
     
-    # Save analysis results
+    # Count entities by type for breakdown
+    entity_breakdown = entities.group_by { |e| e[:entity_type] }.transform_values(&:count)
+    
+    # Save analysis results with entity count and confidence
     results = {
       document_type: analysis[:document_type],
       parties: analysis[:parties],
@@ -340,12 +425,15 @@ class EnterpriseAIService
       risk_issues: analysis[:risk_level][:issues],
       completeness: analysis[:completeness][:score],
       recommendations: analysis[:recommendations],
+      entities_extracted: entities.length,
+      entity_breakdown: entity_breakdown,
+      ai_confidence: confidence[:overall],
       audit_trail: @audit_trail
     }.to_json
     
     db.execute(
-      "UPDATE documents SET status = 'completed', analysis_results = ?, extracted_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [results, text[0..50000], @document_id]
+      "UPDATE documents SET status = 'completed', analysis_results = ?, ai_summary = ?, extracted_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [results, summary, text[0..50000], @document_id]
     )
     
     db.close
