@@ -17,7 +17,7 @@ gem "rack-cors"
 
 # Development server
 gem "puma", "~> 6.0"
-gem "webrick"
+gem "webrick", "~> 1.8"
 
 # Bootsnap for faster boot times
 gem "bootsnap", require: false
