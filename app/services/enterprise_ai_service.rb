@@ -101,41 +101,99 @@ class EnterpriseAIService
   end
 
   def generate_ai_summary(text, entities, analysis)
-    # Use AIProvider to generate summary
-    summary = @ai_provider.generate_summary(text, entities, analysis[:compliance_score], analysis[:risk_level])
-    
-    # Return summary or fallback
-    if summary && !summary.empty?
-      summary
-    else
-      # Fallback summary
-      "This #{analysis[:document_type]} involves #{analysis[:parties].join(' and ')}. Analysis completed with #{entities.length} entities extracted."
+    # Try AI summary if enabled
+    if @ai_provider.enabled?
+      summary = @ai_provider.generate_summary(text, entities, analysis[:compliance_score], analysis[:risk_level])
+      return summary if summary && !summary.empty?
     end
+    
+    # Fallback: Generate summary from extracted entities
+    generate_fallback_summary(text, entities, analysis)
+  end
+  
+  def generate_fallback_summary(text, entities, analysis)
+    parties = analysis[:parties]
+    dates = entities.select { |e| e[:entity_type] == 'DATE' }.map { |e| e[:entity_value] }.first(2)
+    amounts = entities.select { |e| e[:entity_type] == 'AMOUNT' }.map { |e| e[:entity_value] }.first(2)
+    terms = entities.select { |e| e[:entity_type] == 'TERM' }.map { |e| e[:entity_value] }.first(2)
+    
+    summary_parts = []
+    
+    # Document type and parties
+    if parties.length >= 2
+      summary_parts << "This #{analysis[:document_type]} is between #{parties[0]} and #{parties[1]}."
+    elsif parties.length == 1
+      summary_parts << "This #{analysis[:document_type]} involves #{parties[0]}."
+    else
+      summary_parts << "This is a #{analysis[:document_type]}."
+    end
+    
+    # Dates
+    if dates.any?
+      summary_parts << "Key dates include #{dates.join(' and ')}."
+    end
+    
+    # Financial terms
+    if amounts.any?
+      summary_parts << "Financial terms include #{amounts.join(' and ')}."
+    end
+    
+    # Duration
+    if terms.any?
+      summary_parts << "The agreement term is #{terms.first}."
+    end
+    
+    # Compliance and risk
+    summary_parts << "The document has a compliance score of #{analysis[:compliance_score]}% and #{analysis[:risk_level][:level].downcase} risk level."
+    
+    summary_parts.join(' ')
   end
 
   def extract_legal_entities(text)
     puts "Extracting legal entities from text (#{text.length} chars)..."
-    prompt = build_legal_extraction_prompt(text)
-    puts "Prompt built (#{prompt.length} chars), calling AI provider..."
     
-    response = @ai_provider.analyze(prompt)
-    
-    if response.nil?
-      puts "ERROR: AI provider returned nil response"
-      audit_log('ai_provider_error', { error: 'nil response' })
-      return []
+    # Try AI extraction first if enabled
+    if @ai_provider.enabled?
+      puts "AI provider enabled, attempting AI extraction..."
+      prompt = build_legal_extraction_prompt(text)
+      puts "Prompt built (#{prompt.length} chars), calling AI provider..."
+      
+      response = @ai_provider.analyze(prompt)
+      
+      if response.nil? || response.empty?
+        puts "WARNING: AI provider returned empty response, falling back to regex"
+        audit_log('ai_provider_fallback', { reason: 'empty response', method: 'regex' })
+        return extract_with_regex(text)
+      end
+      
+      puts "AI response received (#{response.length} chars)"
+      puts "Response preview: #{response[0..200]}"
+      
+      entities = parse_legal_entities(response)
+      
+      # If AI extraction failed or returned no entities, use regex fallback
+      if entities.empty?
+        puts "WARNING: AI extraction returned no entities, falling back to regex"
+        audit_log('ai_provider_fallback', { reason: 'no entities', method: 'regex' })
+        return extract_with_regex(text)
+      end
+      
+      return entities
+    else
+      # AI not enabled, use regex extraction
+      puts "AI provider not enabled, using regex extraction"
+      audit_log('extraction_method', { method: 'regex', reason: 'ai_disabled' })
+      return extract_with_regex(text)
     end
+  end
+  
+  def extract_with_regex(text)
+    require_relative 'regex_extractor'
+    extractor = RegexExtractor.new(text)
+    entities = extractor.extract_entities
     
-    if response.empty?
-      puts "ERROR: AI provider returned empty response"
-      audit_log('ai_provider_error', { error: 'empty response' })
-      return []
-    end
-    
-    puts "AI response received (#{response.length} chars)"
-    puts "Response preview: #{response[0..200]}"
-    
-    parse_legal_entities(response)
+    puts "Regex extraction completed: #{entities.length} entities found"
+    entities
   end
 
   def build_legal_extraction_prompt(text)
